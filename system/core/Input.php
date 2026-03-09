@@ -73,6 +73,18 @@ class CI_Input {
 	 * @var array
 	 */
 	protected $headers			= array();
+	/**
+	 * Security object
+	 *
+	 * @var object
+	 */
+	var $security;
+	/**
+	 * UTF-8 object
+	 *
+	 * @var object
+	 */
+	var $uni;
 
 	/**
 	 * Constructor
@@ -91,13 +103,13 @@ class CI_Input {
 		$this->_enable_csrf		= (config_item('csrf_protection') === TRUE);
 
 		global $SEC;
-		$this->security =& $SEC;
+		@$this->security =& $SEC;
 
 		// Do we need the UTF-8 class?
 		if (UTF8_ENABLED === TRUE)
 		{
 			global $UNI;
-			$this->uni =& $UNI;
+			@$this->uni =& $UNI;
 		}
 
 		// Sanitize global arrays

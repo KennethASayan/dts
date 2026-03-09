@@ -301,7 +301,7 @@ class CI_Loader {
 
 			$model = ucfirst($model);
 
-			$CI->$name = new $model();
+			@$CI->$name = new $model();
 
 			$this->_ci_models[] = $name;
 			return;
@@ -341,10 +341,10 @@ class CI_Loader {
 
 		// Initialize the db variable.  Needed to prevent
 		// reference errors with some configurations
-		$CI->db = '';
+		@$CI->db = '';
 
 		// Load the DB class
-		$CI->db =& DB($params, $active_record);
+		@$CI->db =& DB($params, $active_record);
 	}
 
 	// --------------------------------------------------------------------
@@ -371,7 +371,7 @@ class CI_Loader {
 		require_once(BASEPATH.'database/drivers/'.$CI->db->dbdriver.'/'.$CI->db->dbdriver.'_utility.php');
 		$class = 'CI_DB_'.$CI->db->dbdriver.'_utility';
 
-		$CI->dbutil = new $class();
+		@$CI->dbutil = new $class();
 	}
 
 	// --------------------------------------------------------------------
@@ -394,7 +394,7 @@ class CI_Loader {
 		require_once(BASEPATH.'database/drivers/'.$CI->db->dbdriver.'/'.$CI->db->dbdriver.'_forge.php');
 		$class = 'CI_DB_'.$CI->db->dbdriver.'_forge';
 
-		$CI->dbforge = new $class();
+		@$CI->dbforge = new $class();
 	}
 
 	// --------------------------------------------------------------------
@@ -1093,11 +1093,11 @@ class CI_Loader {
 		$CI =& get_instance();
 		if ($config !== NULL)
 		{
-			$CI->$classvar = new $name($config);
+			@$CI->$classvar = new $name($config);
 		}
 		else
 		{
-			$CI->$classvar = new $name;
+			@$CI->$classvar = new $name;
 		}
 	}
 
