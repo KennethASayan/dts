@@ -36,42 +36,47 @@ class C_dts extends CI_Controller {
 	
 	public function login()
 	{
-		
 		$log['uname'] = $this->input->post('uname');
 		$log['upwd'] = $this->input->post('upwd');
-		$u_flag=$this->m_dts->login($log);
-				
-		if ($this->m_dts->login($log) != null && $u_flag[0]['stat_flag']!=0)
+		
+		// Call login once and store result in array
+		$u_log = $this->m_dts->login($log);
+		
+		// Check if user exists and account is active
+		if ($u_log != null && is_array($u_log) && count($u_log) > 0 && $u_log[0]['stat_flag'] != 0)
 		{   
+			// Set session valid and all user data from the array at once
 			$this->session->set_userdata('valid', TRUE);
 			
-			$u_log = $this->m_dts->login($log);
-			foreach($u_log as $row){
-				$this->session->set_userdata('u_log_id', $row['u_id']);
-				$this->session->set_userdata('u_log_fname', $row['f_name']);
-				$this->session->set_userdata('u_log_lname', $row['l_name']);
-				$this->session->set_userdata('role_log_id', $row['role_id']);
-				$this->session->set_userdata('role_log_name', $row['role_name']);
-				$this->session->set_userdata('div_log_id', $row['div_id']);
-				$this->session->set_userdata('div_log_alias', $row['div_alias']);
-				$this->session->set_userdata('off_log_id', $row['off_id']);
-				$this->session->set_userdata('off_log_pname', $row['p_name']);
-				$this->session->set_userdata('off_log_penro', $row['off_name']);
-				$this->session->set_userdata('off_log_address', $row['off_address']);
-			}
-				
-				
-				redirect('c_dts/record_page');
+			$user_data = array(
+				'u_log_id' => $u_log[0]['u_id'],
+				'u_log_fname' => $u_log[0]['f_name'],
+				'u_log_lname' => $u_log[0]['l_name'],
+				'role_log_id' => $u_log[0]['role_id'],
+				'role_log_name' => $u_log[0]['role_name'],
+				'div_log_id' => $u_log[0]['div_id'],
+				'div_log_alias' => $u_log[0]['div_alias'],
+				'off_log_id' => $u_log[0]['off_id'],
+				'off_log_pname' => $u_log[0]['p_name'],
+				'off_log_penro' => $u_log[0]['off_name'],
+				'off_log_address' => $u_log[0]['off_address']
+			);
 			
+			// Set all user data at once
+			$this->session->set_userdata($user_data);
+			
+			redirect('c_dts/record_page');
 		}
 		else
 		{
-				
-				if($u_flag[0]['stat_flag']=='0'){$msg = "Your account is deactivated";}
-				else if($log['uname']!=null){$msg = "Incorrect Username/Password";}
-				$this->session->set_flashdata('msg',$msg);
-				redirect('c_dts');
-				
+			// Set error message based on login result
+			$msg = "Incorrect Username/Password";
+			if ($u_log != null && is_array($u_log) && count($u_log) > 0 && $u_log[0]['stat_flag'] == 0) {
+				$msg = "Your account is deactivated";
+			}
+			
+			$this->session->set_flashdata('msg', $msg);
+			redirect('c_dts');
 		} 
 		
 	}

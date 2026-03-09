@@ -22,12 +22,28 @@ class Dompdf_gen {
 		
 	public function __construct() {
 		
-		require_once APPPATH.'third_party/dompdf/autoload.inc.php';
+		$dompdf_path = APPPATH.'third_party/dompdf/autoload.inc.php';
 		
-		$pdf = new Dompdf\DOMPDF();
+		// Check if DOMPDF autoloader exists
+		if (!file_exists($dompdf_path)) {
+			log_message('error', 'DOMPDF autoloader not found at: ' . $dompdf_path);
+			return;
+		}
 		
-		$CI =& get_instance();
-		$CI->dompdf = $pdf;
+		try {
+			require_once $dompdf_path;
+			
+			// Check if Dompdf class exists
+			if (class_exists('Dompdf\DOMPDF')) {
+				$pdf = new Dompdf\DOMPDF();
+				$CI =& get_instance();
+				$CI->dompdf = $pdf;
+			} else {
+				log_message('error', 'Dompdf\DOMPDF class not found. DOMPDF library files may be incomplete.');
+			}
+		} catch (Exception $e) {
+			log_message('error', 'Failed to load DOMPDF: ' . $e->getMessage());
+		}
 		
 	}
 	
