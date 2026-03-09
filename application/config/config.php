@@ -22,7 +22,7 @@
 | a PHP script and you can easily do that on your own.
 |
 */
-$config['base_url'] = 'https://staging.dts.denr10.com.ph/';
+$config['base_url'] = 'https://staging-dts.denr10.com.ph/';
 /*
 |--------------------------------------------------------------------------
 | Index File
