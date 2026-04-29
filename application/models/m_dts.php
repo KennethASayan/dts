@@ -69,38 +69,38 @@ class M_dts extends CI_Model {
 			}
 				
 			public function put_record($doc_no)
-			{
-				date_default_timezone_set('Asia/Manila');
-				
-					if($this->input->post('doc_class2')==1){
-						$ef_id=1;                      
-					}
-					elseif($this->input->post('doc_class2')==2){
-						$ef_id=5;
-					}
-				
-					$data = array
-								(
-									'doc_no' => $doc_no,
-									'u_id' => $this->session->userdata('u_log_id'),
-									'doc_class' => $this->input->post('doc_class2'),
-									'dt_id' => $this->input->post('dt_id2'),
-									'doc_subject' => strtoupper(preg_replace('/[^a-zA-Z0-9-_().: ]/','', trim($this->input->post('doc_subject2')))),
-									'sender' => strtoupper($this->input->post('sender_f2')),
-									'doc_date' => $this->input->post('doc_date2'),
-									'rec_date' => date('M-d-Y'),
-									'act_date' => date('M-d-Y'),
-									'rec_time' => date('h:i A'),
-									//'div_id' => $this->session->userdata('div_log_id'),
-									'ef_id' => $ef_id,
-									'act_flag' => 0,
-									'prior_t' => $this->input->post('prior_t2'),
-									'doc_date_rr' => date_format(date_create($this->input->post('doc_date_rr2')), 'M-d-Y'),
-									'doc_time_rr' =>  date_format(date_create($this->input->post('doc_time_rr2')), 'h:i A'),
-								);  
-					$this->db->insert('doc_rec', $data);
-					
-			}
+{
+    date_default_timezone_set('Asia/Manila');
+
+    if($this->input->post('doc_class2')==1){
+        $ef_id=1;                      
+    }
+    elseif($this->input->post('doc_class2')==2){
+        $ef_id=5;
+    }
+
+    $div_id = $this->session->userdata('div_log_id');
+
+    $data = array(
+        'doc_no' => $doc_no,
+        'u_id' => $this->session->userdata('u_log_id'),
+        'doc_class' => $this->input->post('doc_class2'),
+        'dt_id' => $this->input->post('dt_id2'),
+        'doc_subject' => strtoupper(preg_replace('/[^a-zA-Z0-9-_().: ]/','', trim($this->input->post('doc_subject2')))),
+        'sender' => strtoupper($this->input->post('sender_f2')),
+        'doc_date' => $this->input->post('doc_date2'),
+        'rec_date' => date('M-d-Y'),
+        'act_date' => date('M-d-Y'),
+        'rec_time' => date('h:i A'),
+        'div_id' => ','.$div_id.',',  // ✅ Store with commas so LIKE "%,X,%" works
+        'ef_id' => $ef_id,
+        'act_flag' => 0,
+        'prior_t' => $this->input->post('prior_t2'),
+        'doc_date_rr' => date_format(date_create($this->input->post('doc_date_rr2')), 'M-d-Y'),
+        'doc_time_rr' =>  date_format(date_create($this->input->post('doc_time_rr2')), 'h:i A'),
+    );  
+    $this->db->insert('doc_rec', $data);
+}
 			
 			public function put_act_record($doc_act_no)
 			{
@@ -157,10 +157,12 @@ class M_dts extends CI_Model {
 					  }
 				  else{
 					 
-					  if($trigg==0 OR $trigg==99){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id != 6";}
+					  if($trigg==0 OR $trigg==99){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE (doc_rec.div_id LIKE '%,$div_id,%' OR doc_rec.div_id LIKE '%,1,%' OR (doc_rec.div_id IS NULL OR doc_rec.div_id = ',') OR doc_rec.doc_class = '2')";}
 					  elseif($trigg==1){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id = 2";}
 					  elseif($trigg==2){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND (doc_rec.ef_id != 2 AND doc_rec.ef_id != 6 AND doc_rec.ef_id != 7 AND doc_rec.ef_id != 8 AND doc_rec.ef_id != 9 AND doc_rec.ef_id != 10)";}
 					  elseif($trigg==3){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND (doc_rec.ef_id = 7 OR doc_rec.ef_id = 8 OR doc_rec.ef_id = 5 OR doc_rec.ef_id = 10)";}
+					  elseif($trigg==4){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id = 1";}
+					  elseif($trigg==5){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id = 6";}
 					  elseif($trigg==6){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id = 9 ";}
 					  
 				  }
@@ -189,10 +191,12 @@ class M_dts extends CI_Model {
 					  }
 				  else{
 					 
-					  if($trigg==0 OR $trigg==99){$thesql = "SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id != 6";}
+					  if($trigg==0 OR $trigg==99){$thesql = "SELECT count(rec_id) as cnt FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE (doc_rec.div_id LIKE '%,$div_id,%' OR doc_rec.div_id LIKE '%,1,%' OR (doc_rec.div_id IS NULL OR doc_rec.div_id = ',') OR doc_rec.doc_class = '2')";}
 					  elseif($trigg==1){$thesql = "SELECT count(rec_id) as cnt  FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id = 2";}
 					  elseif($trigg==2){$thesql = "SELECT count(rec_id) as cnt  FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND (doc_rec.ef_id != 2 AND doc_rec.ef_id != 6 AND doc_rec.ef_id != 7 AND doc_rec.ef_id != 8 AND doc_rec.ef_id != 9 AND doc_rec.ef_id != 10)";}
 					  elseif($trigg==3){$thesql = "SELECT count(rec_id) as cnt  FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND (doc_rec.ef_id = 7 OR doc_rec.ef_id = 8 OR doc_rec.ef_id = 5 OR doc_rec.ef_id = 10)";}
+					  elseif($trigg==4){$thesql = "SELECT count(rec_id) as cnt FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id = 1";}
+					  elseif($trigg==5){$thesql = "SELECT count(rec_id) as cnt FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id = 6";}
 					  elseif($trigg==6){$thesql = "SELECT count(rec_id) as cnt  FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE '%,$div_id,%' AND doc_rec.doc_class = '1' AND doc_rec.ef_id = 9 AND (doc_rec.doc_no LIKE '".date('Y')."-%' OR doc_rec.doc_no LIKE '".(date('Y')-1)."-12-%') ";}
 					  
 				  }
@@ -631,58 +635,80 @@ class M_dts extends CI_Model {
 				
 				date_default_timezone_set('Asia/Manila');
 				
-				$div_id=implode(",",$this->input->post('div_id'));
-				$sec_id=implode(",",$this->input->post('sec_id'));
-				$unit_id=implode(",",$this->input->post('unit_id'));
-				$act_id=implode(",",$this->input->post('act_id'));
+			// ✅ Only process routing data if POST data exists (for routing operations)
+			$div_id = ($this->input->post('div_id')) ? implode(",",$this->input->post('div_id')) : '';
+			$sec_id = ($this->input->post('sec_id')) ? implode(",",$this->input->post('sec_id')) : '';
+			$unit_id = ($this->input->post('unit_id')) ? implode(",",$this->input->post('unit_id')) : '';
+			$act_id = ($this->input->post('act_id')) ? implode(",",$this->input->post('act_id')) : '';
+			
+			if($ef_id==4){
+				// ✅ FIX: Get current div_id and APPEND new divisions instead of replacing
+				$current_record = $this->db->query("SELECT div_id FROM doc_rec WHERE doc_no = '$doc_no'")->result_array();
+				$current_div_id = isset($current_record[0]['div_id']) ? trim($current_record[0]['div_id'], ',') : '';
 				
-				if($ef_id==4){
-					$data = array
-							(
-								'ef_id' => $ef_id,
-								'dt_recv' => date('Y-m-d H:i:s'),
-								'act_date' => date('M-d-Y'),
-							);        
+				// Combine existing and new division IDs (avoid duplicates)
+				$new_div_ids = explode(',', $div_id);
+				$existing_div_ids = !empty($current_div_id) ? explode(',', $current_div_id) : array();
+				$all_div_ids = array_unique(array_filter(array_merge($existing_div_ids, $new_div_ids)));
+				$combined_div_id = implode(',', $all_div_ids);
+				
+				$data = array
+						(
+							'ef_id' => $ef_id,
+							'div_id' => ','.$combined_div_id.',',  // ✅ APPEND new divisions to existing
+							'dt_recv' => date('Y-m-d H:i:s'),
+							'act_date' => date('M-d-Y'),
+						);        
+			}
+			elseif($ef_id==6){
+				$data = array
+						(
+							'ef_id' => $ef_id,
+							'act_date' => date('M-d-Y'),
+						);        
+			}
+			elseif($ef_id==7){
+				$data = array
+						(
+							'ef_id' => $ef_id,
+							'dt_recv' => '',
+							'act_date' => date('M-d-Y'),
+						);        
+			}
+			elseif($ef_id==8){
+				$data = array
+						(
+							'ef_id' => $ef_id,
+							'dt_recv' => '',
+							'act_date' => date('M-d-Y'),
+						);        
+			}
+			else{
+				// ✅ FIX: Get current div_id and APPEND instead of replacing (for all ef_id values)
+				if($this->input->post('act_flag')==1){$ef_id = 9;}
+				if($div_id && (strpos($div_id,'4')!==false OR strpos($div_id,'5')!==false)){$ef_id = 7;}
+				if($act_id && strpos($act_id,'6')!==false){$ef_id = 7;}
+				
+				// Handle div_id: Append new divisions to existing ones
+				$updated_div_id = '';
+				if($div_id) {
+					$current_record = $this->db->query("SELECT div_id FROM doc_rec WHERE doc_no = '$doc_no'")->result_array();
+					$current_div_id = isset($current_record[0]['div_id']) ? trim($current_record[0]['div_id'], ',') : '';
+					
+					// Combine existing and new division IDs (avoid duplicates)
+					$new_div_ids = explode(',', $div_id);
+					$existing_div_ids = !empty($current_div_id) ? explode(',', $current_div_id) : array();
+					$all_div_ids = array_unique(array_filter(array_merge($existing_div_ids, $new_div_ids)));
+					$updated_div_id = ","  .implode(',', $all_div_ids) . ",";
 				}
-				elseif($ef_id==6){
-					$data = array
-							(
-								'ef_id' => $ef_id,
-								'act_date' => date('M-d-Y'),
-							);        
-				}
-				elseif($ef_id==7){
-					$data = array
-							(
-								'ef_id' => $ef_id,
-								'dt_recv' => '',
-								'act_date' => date('M-d-Y'),
-							);        
-				}
-				elseif($ef_id==8){
-					$data = array
-							(
-								'ef_id' => $ef_id,
-								'dt_recv' => '',
-								'act_date' => date('M-d-Y'),
-							);        
-				}
-				else{
-					if($this->input->post('act_flag')==1){$ef_id = 9;}
-					if(strpos($div_id,'4')!==false OR strpos($div_id,'5')!==false){$ef_id = 7;}
-					if(strpos($act_id,'6')!==false){$ef_id = 7;}
-					//if(preg_match("/\b1\b/i",$div_id) OR preg_match("/\b4\b/i",$div_id) OR preg_match("/\b5\b/i",$div_id)){$ef_id = 7;}
-					$data = array
-							(
-								'div_id' => ",".$div_id.",",
-								'sec_id' => $sec_id.",",
-								'unit_id' => $unit_id.",",
-								'ef_id' => $ef_id,
-								'act_id' => $act_id.",",
-								'act_date' => date('M-d-Y'),
-								'act_flag' => $this->input->post('act_flag'),
-								'act_pers' => $this->input->post('act_pers'),
-								'doc_remarks' => $this->input->post('doc_remarks'),
+				
+				$data = array
+						(
+							'div_id' => ($updated_div_id ? $updated_div_id : ""),  // ✅ APPEND to existing div_id
+							'sec_id' => ($sec_id ? $sec_id."," : ""),
+							'unit_id' => ($unit_id ? $unit_id."," : ""),
+							'ef_id' => $ef_id,
+							'act_id' => ($act_id ? $act_id."," : ""),
 								'act_class' => $this->input->post('doc_clsf'),
 							);   
 				}
@@ -721,59 +747,66 @@ class M_dts extends CI_Model {
 			public function get_off_sec(){	
 				  
 				  $off_id = $this->session->userdata('off_log_id');
+				  $off_penro = $this->session->userdata('off_log_penro');
 				  
 				  $div_id = $this->session->userdata('div_log_id');
 				  $data_return = array();
-				  if($div_id==1){$thesql = "SELECT * FROM off_section WHERE off_id = '1' OR off_id = $off_id"; }
-				  else{$thesql = "SELECT * FROM off_section WHERE off_section.div_id = '$div_id' AND (off_id = '1' OR off_id = $off_id)";}
-				  $query = $this->db->query($thesql);
-				  foreach ($query->result_array() as $row) 
-					  {
-						$data_return[]=$row;
-					  }
-				  return $data_return;
-					
+			  
+		  // ✅ Routing slip sections: 
+		  // PENRO (off_id < 7): Show shared sections (off_id=0) + PENRO template (off_id=1)
+		  // CENRO (off_id >= 7): Show shared sections (off_id=0) + CENRO template (off_id=3)
+		  // NOTE: Do NOT include office-specific sections for routing slip
+		  if($off_id >= 7){
+		  	// CENRO user - show shared sections (off_id=0) + CENRO template sections (off_id=3)
+		  	$thesql = "SELECT * FROM off_section WHERE off_id = '0' OR off_id = '3' ORDER BY sec_alias ASC";
+		  } else {
+		  	// PENRO user - show shared sections (off_id=0) + PENRO template sections (off_id=1)
+		  	$thesql = "SELECT * FROM off_section WHERE off_id = '0' OR off_id = '1' ORDER BY sec_alias ASC";
+		  }
+		  
+		  $query = $this->db->query($thesql);
+		  foreach ($query->result_array() as $row) 
+		  {
+			$data_return[]=$row;
+		  }
+		  return $data_return;
 			}
 			
 			public function get_off_unit(){
 				
-				  $div_id = $this->session->userdata('div_log_id');
-				  $data_return = array();
-				  if($div_id==1){
-				  $thesql = "SELECT * FROM off_unit ORDER BY unit_alias ASC";
-				  }
-				  else{
-				  $thesql = "SELECT * FROM off_unit 
-							INNER JOIN dts_db.off_section
-							ON (off_unit.sec_id = off_section.sec_id)
-							WHERE off_section.div_id = '$div_id' ORDER BY unit_alias ASC";   
-				  }
-				  $query = $this->db->query($thesql);
-				  foreach ($query->result_array() as $row) 
-					  {
-						$data_return[]=$row;
-					  }
-				  return $data_return;
-					
-			}
-			
-			public function get_all_off_sec(){	
-				  
-				  $off_id = $this->session->userdata('off_log_id');
-				  
-				  $data_return = array();
-				  $thesql = "SELECT * FROM off_section WHERE off_id = '1' OR off_id = $off_id";
-				  
-				  $query = $this->db->query($thesql);
-				  foreach ($query->result_array() as $row) 
-					  {
-						$data_return[]=$row;
-					  }
-				  return $data_return;
-					
-			}
-	
-			public function put_logs($event,$doc_no)
+			  $off_id = $this->session->userdata('off_log_id');
+			  $div_id = $this->session->userdata('div_log_id');
+			  $data_return = array();
+			  if($div_id==1){
+			  	$thesql = "SELECT * FROM off_unit ORDER BY unit_alias ASC";
+			  }
+			  else{
+		  	// ✅ Show units from appropriate template sections: PENRO gets off_id=1, CENRO gets off_id=3
+		  	// Do NOT include office-specific units from the office's own off_id
+		  	if($off_id >= 7){
+		  		// CENRO user - show units from shared (off_id=0) + CENRO template sections (off_id=3)
+		  		$thesql = "SELECT DISTINCT off_unit.* FROM off_unit 
+					INNER JOIN dts_db.off_section
+					ON (off_unit.sec_id = off_section.sec_id)
+					WHERE off_section.off_id = '0' OR off_section.off_id = '3' ORDER BY unit_alias ASC";
+		  	} else {
+		  		// PENRO user - show units from shared (off_id=0) + PENRO template sections (off_id=1)
+		  		$thesql = "SELECT DISTINCT off_unit.* FROM off_unit 
+					INNER JOIN dts_db.off_section
+					ON (off_unit.sec_id = off_section.sec_id)
+					WHERE off_section.off_id = '0' OR off_section.off_id = '1' ORDER BY unit_alias ASC";
+		  	}
+		  }
+		  $query = $this->db->query($thesql);
+		  foreach ($query->result_array() as $row) 
+		  {
+			$data_return[]=$row;
+		  }
+		  return $data_return;
+				
+		}
+
+		public function put_logs($event,$doc_no)
 			{
 				date_default_timezone_set('Asia/Manila');
 				

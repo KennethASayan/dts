@@ -1,37 +1,65 @@
 	
 	
 	<div style="width:20%;float:right;margin:5px 0px;font-size:15px">
-		<?php foreach ($records as $rec):?>
-				<span><b>Document No.: </b><i><?php echo $rec['doc_no'];?></i></span>
-				<br>
-				<span><b>Date Uploaded: </b><i><?php echo $rec['rec_date'];?></i></span>
-		<?php endforeach;?>	
+		<?php if(isset($is_ro_intransit) && $is_ro_intransit && isset($ro_metadata)):?>
+			<!-- RO In-Transit document metadata -->
+			<span><b>Document No.: </b><i><?php echo $ro_metadata['document_no'];?></i></span>
+			<br>
+			<span><b>Date Uploaded: </b><i><?php echo $ro_metadata['date_uploaded'];?></i></span>
+			<br>
+			<span><b>Document Date: </b><i><?php echo $ro_metadata['document_date'];?></i></span>
+			<br>
+			<span><b>Level of Priority: </b><i><?php echo $ro_metadata['priority_level'];?></i></span>
+			<br>
+			<span><b>Recipient: </b><i><?php echo $ro_metadata['recipient'];?></i></span>
+			<br>
+			<span><b>Date/Time Released: </b><i><?php echo $ro_metadata['date_released'];?></i></span>
+			<br>
+			<span><b>Subject: </b><i><?php echo substr($ro_metadata['subject'], 0, 50) . (strlen($ro_metadata['subject']) > 50 ? '...' : '');?></i></span>
+		<?php else:?>
+			<!-- Legacy DTS document metadata -->
+			<?php foreach ($records as $rec):?>
+					<span><b>Document No.: </b><i><?php echo $rec['doc_no'];?></i></span>
+					<br>
+					<span><b>Date Uploaded: </b><i><?php echo $rec['rec_date'];?></i></span>
+			<?php endforeach;?>	
+		<?php endif;?>
 	</div>	
 	<div style="width:80%;float:left;margin:10px 0px 20px 0px;">
 				
-				<?php if($this->session->userdata('div_log_id')==1):?>
+				<?php if((($this->session->userdata('div_log_id')==1 || strpos($this->session->userdata('off_log_penro'), 'CENR') !== false)) && (!isset($is_ro_intransit) || !$is_ro_intransit)):?>
 					<a href="<?php echo base_url();?>c_dts/route_slip?doc_no=<?php echo $doc_no;?>" target="_blank" id="rsb">Routing Slip</a>
 				<?php endif;?>
-				<?php if($this->session->userdata('role_log_id')!=6):?>
+				
+				<!-- ✅ Show action buttons based on role and document type -->
+				<?php if($this->session->userdata('role_log_id')!=6 && (!isset($is_ro_intransit) || !$is_ro_intransit)):?>
 					<a href="#" id="routb">Route Document</a>
-				<?php if($this->session->userdata('div_log_id')!=1):?>
-					<a href="#" id="ackb">Acknowledge Receipt</a>
-					<a href="#" id="recvb">Receive Document</a>
-					<a href="#" id="for_dc">For Chief <?php echo $this->session->userdata('div_log_alias');?></a>
-					<a href="#" id="retrnb">Return</a>
+				<?php endif;?>
+				
+				<?php if($this->session->userdata('div_log_id')!=1 || (isset($is_ro_intransit) && $is_ro_intransit)):?>
+					<?php if($this->session->userdata('role_log_id')!=6):?>
+						<a href="#" id="ackb">Acknowledge Receipt</a>
+						<?php if(!isset($is_ro_intransit) || !$is_ro_intransit):?>
+							<a href="#" id="recvb">Receive Document</a>
+						<?php endif;?>
+					<?php endif;?>
+				<?php endif;?>
+				
+				<!-- ✅ For RO In-Transit, show Receive Document button (no role restriction) -->
+				<?php if(isset($is_ro_intransit) && $is_ro_intransit):?>
+					<a href="#" id="recvb" style="display: inline-block; padding: 5px 15px; margin-right: 5px; background-color: #CA5F5F; color: white; text-decoration: none; border-radius: 3px; cursor: pointer;">Receive Document</a>
+					<a href="#" id="returnb" style="display: inline-block; padding: 8px 15px; margin-right: 5px; background-color: #CA5F5F; color: white; text-decoration: none; border-radius: 3px; cursor: pointer;">Return Document</a>
 				<?php endif;?>
 				
 				<!--<a href="#" id="logb">Show Tracks</a>-->
 				<a href="#" id="actb">Action Taken</a>
-				<?php if($this->session->userdata('div_log_id')==1):?>
+				<?php if($this->session->userdata('div_log_id')==1 && (!isset($is_ro_intransit) || !$is_ro_intransit)):?>
 					<a href="#" id="editb">Edit Record</a>
 				<?php endif;?>
-				<?php if($this->session->userdata('role_log_id')==1):?>
+				<?php if($this->session->userdata('role_log_id')==1 && (!isset($is_ro_intransit) || !$is_ro_intransit)):?>
 					<a href="#" id="delb">Delete Record</a>
 				<?php endif;?>
 				<a href="#" id="saveb">Save</a>
-				<a href="#" id="cnclb">Cancel</a>
-				<?php endif;?>
 	</div>	
 		
 
@@ -42,24 +70,32 @@
 				<div id="up_msg"></div>
 				<div id="act_up_modal"></div>
 
+				<?php $rec = isset($records) && count($records) > 0 ? $records[0] : array(); ?>
 
 				<form id="doc_frm" name="doc_frm" action="" method="POST">
+									
+									<!-- ✅ Hidden field for RO In-Transit documents -->
+									<!-- Note: DTS will generate its own doc_no when receiving -->
+									<?php if(isset($is_ro_intransit) && $is_ro_intransit && isset($ro_metadata)):?>
+										<input type="hidden" name="ro_doc_no" id="ro_doc_no" value="<?php echo $ro_metadata['document_no'];?>"/>
+										<input type="hidden" name="ef_id" id="ef_id" value="4"/>
+										<input type="hidden" name="is_ro_intransit" id="is_ro_intransit" value="true"/>
+									<?php endif;?>
+									
 									<div id="modal_route">
 									<center>
 									<!--<h4 style="margin:0px 0px 20px 0px">ROUTE TO:</h4>-->
 									<table id="rec_tbl" style="width:100%;background-color:#f4f4f4;padding:10px;border:1px solid gray">
 									<tr id="act_flag_sec"><td><b>Required Action?</b></td><td><i>
 									
-										<input style="height:15px;width:15px;" type="checkbox" name="act_flag" id="act_flag" value="1" <?php if($rec['act_flag']=="1"){echo "checked";}?> />Yes
-										
-									</i></td></tr>
+									<input style="height:15px;width:15px;" type="checkbox" name="act_flag" id="act_flag" value="1" <?php if(isset($rec['act_flag']) && $rec['act_flag']=="1"){echo "checked";}?> />Yes
 									<tr id="act_class_sec" style="height:70px;">
 										<td style="vertical-align:top;"><b>Classification</b></td>
 										<td style="text-align:left;vertical-align:top;">
-											<input style="height:15px;width:15px;" type="radio" name="doc_clsf" value="Simple" <?php if($rec['act_class']=="Simple"){echo "checked";}?> />Simple
-											<input style="height:15px;width:15px;margin-left:30px" type="radio" name="doc_clsf" value="Complex" <?php if($rec['act_class']=="Complex"){echo "checked";}?> />Complex
-											<input style="height:15px;width:15px;margin-left:30px" type="radio" name="doc_clsf" value="Highly Technical" <?php if($rec['act_class']=="Highly Technical"){echo "checked";}?> />Highly Technical
-											<input style="height:15px;width:15px;margin-left:30px" type="radio" name="doc_clsf" value="Legal Concern" <?php if($rec['act_class']=="Legal Concern"){echo "checked";}?> />Legal Concern
+											<input style="height:15px;width:15px;" type="radio" name="doc_clsf" value="Simple" <?php if(isset($rec['act_class']) && $rec['act_class']=="Simple"){echo "checked";}?> />Simple
+											<input style="height:15px;width:15px;margin-left:30px" type="radio" name="doc_clsf" value="Complex" <?php if(isset($rec['act_class']) && $rec['act_class']=="Complex"){echo "checked";}?> />Complex
+											<input style="height:15px;width:15px;margin-left:30px" type="radio" name="doc_clsf" value="Highly Technical" <?php if(isset($rec['act_class']) && $rec['act_class']=="Highly Technical"){echo "checked";}?> />Highly Technical
+											<input style="height:15px;width:15px;margin-left:30px" type="radio" name="doc_clsf" value="Legal Concern" <?php if(isset($rec['act_class']) && $rec['act_class']=="Legal Concern"){echo "checked";}?> />Legal Concern
 										</td>
 									</tr>
 												
@@ -70,7 +106,7 @@
 										<?php foreach ($div_list as $list):?>
 										<?php if(strpos($list['div_alias'],'C-')===false AND strpos($list['div_alias'],'PA-')===false AND $list['div_id']!=1):?>
 											
-											<input style="height:15px;width:15px" type="checkbox" name="div_id[]" id="div_type<?php echo $list['div_id'];?>" value="<?php echo $list['div_id'];?>" <?php  $div_ids = explode(",", $rec['div_id']); foreach ($div_ids as $div){ if($list['div_id']==$div) {echo "checked";} }?> /><?php echo $list['div_name']." (".$list['div_alias'].")";?>
+											<input style="height:15px;width:15px" type="checkbox" name="div_id[]" id="div_type<?php echo $list['div_id'];?>" value="<?php echo $list['div_id'];?>" <?php  $div_ids = isset($rec['div_id']) && !empty($rec['div_id']) ? explode(",", $rec['div_id']) : array(); foreach ($div_ids as $div){ if($list['div_id']==$div) {echo "checked";} }?> /><?php echo $list['div_name']." (".$list['div_alias'].")";?>
 											<br>
 											
 										<?php endif;?>
@@ -83,12 +119,13 @@
 										<td style="vertical-align:top;width:50px"><b>Section</b></td>
 										<td>
 										<div style="column-count:2">						
-										<?php foreach ($sec_list as $list):?>
-											
-											<input style="height:15px;width:15px" type="checkbox" name="sec_id[]" value="<?php echo $list['sec_id'];?>" <?php  $sec_ids = explode(",", $rec['sec_id']); foreach ($sec_ids as $sec){ if($list['sec_id']==$sec) {echo "checked";} }?> /><?php echo $list['sec_alias'];?>
-											<br>
-											
-										<?php endforeach;?>
+										<?php if(isset($sec_list) && is_array($sec_list)):?>
+											<?php foreach ($sec_list as $list):?>
+												<input style="height:15px;width:15px" type="checkbox" name="sec_id[]" value="<?php echo $list['sec_id'];?>" <?php  $sec_ids = isset($rec['sec_id']) && !empty($rec['sec_id']) ? explode(",", $rec['sec_id']) : array(); foreach ($sec_ids as $sec){ if($list['sec_id']==$sec) {echo "checked";} }?> /><?php echo $list['sec_alias'];?>
+												<br>
+												
+											<?php endforeach;?>
+										<?php endif;?>
 										</div>
 										</td>
 									</tr>
@@ -97,12 +134,13 @@
 										<td style="vertical-align:top;width:50px"><b>Unit</b></td>
 										<td>	
 										<div style="column-count:2">						
-										<?php foreach ($unit_list as $list):?>
-											
-											<input style="height:15px;width:15px" type="checkbox" name="unit_id[]" value="<?php echo $list['unit_id'];?>" <?php  $unit_ids = explode(",", $rec['unit_id']); foreach ($unit_ids as $unit){ if($list['unit_id']==$unit) {echo "checked";} }?> /><?php echo $list['unit_alias'];?>
-											<br>
-											
-										<?php endforeach;?>
+										<?php if(isset($unit_list) && is_array($unit_list)):?>
+											<?php foreach ($unit_list as $list):?>
+												<input style="height:15px;width:15px" type="checkbox" name="unit_id[]" value="<?php echo $list['unit_id'];?>" <?php  $unit_ids = isset($rec['unit_id']) && !empty($rec['unit_id']) ? explode(",", $rec['unit_id']) : array(); foreach ($unit_ids as $unit){ if($list['unit_id']==$unit) {echo "checked";} }?> /><?php echo $list['unit_alias'];?>
+												<br>
+												
+											<?php endforeach;?>
+										<?php endif;?>
 										</div>
 										</td>
 									</tr>
@@ -113,7 +151,7 @@
 										<div>						
 										<?php foreach ($act_desc as $list):?>
 											<?php if($this->session->userdata('div_log_id')==1 OR $list['act_id']!=6):?>
-												<input style="height:15px;width:15px" type="checkbox" name="act_id[]" id="act_id<?php echo $list['act_id'];?>" value="<?php echo $list['act_id'];?>" <?php  $act_ids = explode(",", $rec['act_id']); foreach ($act_ids as $act){ if($list['act_id']==$act) {echo "checked";} }?> /><?php echo $list['act_description'];?>
+												<input style="height:15px;width:15px" type="checkbox" name="act_id[]" id="act_id<?php echo $list['act_id'];?>" value="<?php echo $list['act_id'];?>" <?php  $act_ids = isset($rec['act_id']) && !empty($rec['act_id']) ? explode(",", $rec['act_id']) : array(); foreach ($act_ids as $act){ if($list['act_id']==$act) {echo "checked";} }?> /><?php echo $list['act_description'];?>
 											<?php endif;?>
 											<br>
 										<?php endforeach;?>
@@ -151,7 +189,7 @@
 									<?php if($rec['ef_id']==3):?><center><h2 style="color:#ffffff;background-color: #009999;margin:0px 0px 10px 0px;padding:10px">Waiting for Acknowledgement</h2></center>	<?php endif;?>	
 									
 									<?php if($rec['act_flag']==1):?><center><h2 style="color:#ffffff;background-color: #CA5F5F;margin:0px 0px 10px 0px;padding:10px">Waiting for Action</h2></center>		
-									<?php elseif($rec['act_flag']==2):?><center><h2 style="color:#ffffff;background-color: #37cc5e;margin:0px 0px 10px 0px;padding:10px"><?php echo $rec['act_class'];?> Document Acted</h2></center>
+									<?php elseif($rec['act_flag']==2):?><center><h2 style="color:#ffffff;background-color: #37cc5e;margin:0px 0px 10px 0px;padding:10px"><?php echo isset($rec['act_class']) ? $rec['act_class'] : 'Document';?> Document Acted</h2></center>
 									<?php endif;?>		
 									
 									<tr><td><b>Classification</b></td><td><i>
@@ -177,8 +215,7 @@
 										<select name="dt_id" id="dt_id">
 											<option value="">--Select Type--</option>
 											<?php foreach($doc_type as $row):?>
-												<option value="<?php echo $row['dt_id'];?>" <?php if($rec['dt_id']==$row['dt_id']){echo "selected";}?>><?php echo $row['doc_description'];?></option>
-											<?php endforeach; ?>
+<option value="<?php echo $row['dt_id'];?>" <?php if(isset($rec['dt_id']) && $rec['dt_id']==$row['dt_id']){echo "selected";}?>><?php echo !empty($row['dt_name']) ? $row['dt_name'] : (!empty($row['doc_name']) ? $row['doc_name'] : 'Unknown Type');?></option>											<?php endforeach; ?>
 										</select>
 									</td>
 									</tr>
@@ -202,10 +239,20 @@
 										<table id="attach_t" class="" cellspacing="0">
 										<thead style="text-align:left;"><tr><th></th><th></th><th></th><th></th></tr></thead>
 											<?php foreach($files as $row):?>
-												<tr><td><?php echo $row['file_id'];?></td><td><?php echo $row['file_name'];?></td><td><a href="<?php echo base_url()."uploads/".$row['file_name'];?>" target="_blank" style="text-decoration:none;"><img style="margin-right:5px;height:15px;" src="<?php echo base_url();?>ext_lib/images/icon/pdf.png" alt='' /><?php echo $row['file_name'];?></a></td><td style="width:10px"></td></tr>
-											<?php endforeach; ?>
-										</table>
-										</div>
+												  <?php 
+        if(isset($is_ro_intransit) && $is_ro_intransit) {
+            // RO In-Transit: use Laravel API route for serving files
+            $file_url = 'https://dmsapi.denr10.com.ph/dms/documents/view-final-action/' . rawurlencode($row['file_name']);
+        } else {
+            // Legacy DTS: use local uploads folder with sanitized filename
+            $sanitized_name = preg_replace('/[^a-zA-Z0-9-_.,()ñÑ]/', '_', $row['file_name']);
+            $file_url = base_url() . "uploads/" . $sanitized_name;
+        }
+    ?>
+    <tr><td><?php echo isset($row['file_id']) ? $row['file_id'] : 'N/A';?></td><td><?php echo $row['file_name'];?></td><td><a href="<?php echo $file_url;?>" target="_blank" style="text-decoration:none;"><img style="margin-right:5px;height:15px;" src="<?php echo base_url();?>ext_lib/images/icon/pdf.png" alt='' /><?php echo $row['file_name'];?></a></td><td style="width:10px"></td></tr>
+<?php endforeach; ?>
+</table>
+</div>
 										
 										<div id="f_up"><div style="float:left; font-size:14px; margin-top:10px"><input class="custom-file-input" type="file" name="files" id="files" style="width:220px" accept="application/pdf" multiple /></div></div>
 										</td>
@@ -218,9 +265,41 @@
 		</div>
 
 		<div id="r_pane">
-			<?php $check = count($files); foreach($files as $row):?>
-				<embed src="<?php echo base_url()."uploads/".$row['file_name'];?>" width="100%" height="100%" /><?php if($check>1){echo '<br><br>';}?>
-			<?php endforeach; ?>
+			<?php $check = count($files); 
+			if(empty($files)):
+			?>
+				<div style="padding: 20px; text-align: center; color: #999;">
+					<p>No files attached to this document</p>
+				</div>
+			<?php
+			else:
+				foreach($files as $row):
+			?>
+				<?php 
+    $embed_src = '';
+    
+    if(isset($is_ro_intransit) && $is_ro_intransit):
+        // RO In-Transit: use Laravel API route for serving files
+        $embed_src = 'https://dmsapi.denr10.com.ph/dms/documents/view-final-action/' . rawurlencode($row['file_name']);
+    else:
+        // All documents (legacy DTS + received RO In-Transit): files in local uploads folder
+        // Files are sanitized when saved
+        $embed_src = base_url() . "uploads/" . $row['file_name'];
+    endif;
+?>
+				<div style="position: relative; width: 100%; height: 100%;">
+					<embed id="pdf_viewer_<?php echo md5($row['file_name']); ?>" src="<?php echo $embed_src;?>" type="application/pdf" width="100%" height="100%" onerror="document.getElementById('pdf_error_<?php echo md5($row['file_name']); ?>').style.display='block'; this.style.display='none';" />
+					<div id="pdf_error_<?php echo md5($row['file_name']); ?>" style="display:none; padding: 20px; text-align: center; background: #f5f5f5;">
+						<p style="color: #d32f2f; font-weight: bold;">Unable to load PDF file</p>
+						<p style="color: #666;">File: <?php echo htmlspecialchars($row['file_name']); ?></p>
+						<p><a href="<?php echo $embed_src; ?>" target="_blank" style="color: #0288d1; text-decoration: underline;">Download file instead</a></p>
+					</div>
+				</div>
+				<?php if($check>1){echo '<br><br>';}?>
+			<?php 
+				endforeach;
+			endif;
+			?>
 		</div>
 
 		<div id="logs_cont" style="clear:both;padding-top:20px;">
@@ -298,6 +377,7 @@
 		//$('#div_type1').on('click', false);
 		<?php if($this->session->userdata('div_log_id')!=1):?>$('#div_sec').hide();<?php endif;?>
 		<?php if($this->session->userdata('div_log_id')==1):?>$('#sec_sec, #unit_sec').hide();<?php endif;?>
+		<?php if(strpos($this->session->userdata('off_log_penro'), 'CENR') !== false):?>$('#sec_sec, #unit_sec').show();<?php endif;?>
 		//$('#sec_sec, #unit_sec, #resp_sec ').hide();
 		
 		var f_count = 0;
@@ -829,90 +909,295 @@
 		}); */
 		
 		$('#rsb').button();
-				
-		$('#recvb').button().on('click', function(e) {
-			var doc_no = $('#doc_no').val();
-					$.ajax({ 
-							type: "POST", 
-							url: "<?php echo base_url();?>c_dts/update_stat?doc_no="+doc_no+"&ef_id=4",
-							data: $("#doc_frm").serialize(),
-							success: function(){
-								
-								$('#recvb').text('Updating ').append('<img src="<?php echo base_url();?>ext_lib/images/load_logo.gif" class="uploading_img" style="float:right;height:30px;margin:-5px 0px -10px 0px;mix-blend-mode:multiply" />');
-								
-								setTimeout(function() {$("#modal_content").load("<?php echo base_url();?>c_dts/get_prev_page?doc_no="+doc_no+"").dialog({
-												title: 'Record Preview',
-												resizable: false,
-												width: '90%',
-												show: 'fade',
-												hide: 'fade',
-												modal: true,
-												closeOnEscape: false,
-												close: function() {
-													$('.doc_count').each(function(){
-														var ids = $('#'+$(this).attr('id'))['selector'].replace('#', '');
-														get_count_rec(ids).done(function(response){
-															$('#'+ids).text(response[0]['cnt']);
-														});
-													});
-													record_tbl.draw();
-													// window.location.reload();
-												},
-												position: {
-													my: 'center',
-													at: 'top',
-												},
-												
-												
-								});}, 2000);			
-							}
-					});
-				
-		}).css({'background-color':'#CA5F5F', 'color':'#ffffff'});
 		
-		$('#for_dc').button().on('click', function(e) {
+		// ✅ Debug: Check if button exists
+		console.log('recvb button exists:', $('#recvb').length > 0);
+		console.log('is_ro_intransit value:', '<?php echo (isset($is_ro_intransit) && $is_ro_intransit) ? "true" : "false"; ?>');
+		
+		// ✅ Check button visibility
+		if($('#recvb').length > 0) {
+			console.log('recvb visible:', $('#recvb').is(':visible'));
+			console.log('recvb display:', $('#recvb').css('display'));
+			console.log('recvb visibility:', $('#recvb').css('visibility'));
+			console.log('recvb html:', $('#recvb').html());
+		}
+		
+		// ✅ Log form data for debugging
+		console.log('Form values:');
+		console.log('  - ro_doc_no:', $('#ro_doc_no').val());
+		console.log('  - doc_no:', $('#doc_no').val());
+		console.log('  - is_ro_intransit:', $('#is_ro_intransit').val());
+		console.log('  - ef_id:', $('#ef_id').val());
+		
+		// ✅ FORCE SHOW the button - make it visible
+		$('#recvb').css('display', 'inline-block').css('padding', '8px 15px').css('margin-right', '5px').css('background-color', '#CA5F5F').css('color', 'white').css('text-decoration', 'none').css('border-radius', '3px').css('cursor', 'pointer').css('border', 'none');
+		
+		// ✅ Attach click handler directly (without jQuery button styling)
+		$('#recvb').on('click', function(e) {
+			e.preventDefault();  // ✅ Prevent default link behavior
 			var doc_no = $('#doc_no').val();
-					$.ajax({ 
-							type: "POST", 
-							url: "<?php echo base_url();?>c_dts/update_stat?doc_no="+doc_no+"&ef_id=7",
-							data: $("#doc_frm").serialize(),
-							success: function(){
+			var ro_doc_no = $('#ro_doc_no').val();  // RO In-Transit document number
+			var is_ro_intransit = '<?php echo (isset($is_ro_intransit) && $is_ro_intransit) ? "true" : "false"; ?>';
+			
+			// ✅ For RO In-Transit, use the RO doc_no; for legacy, use DTS doc_no
+			var document_to_process = is_ro_intransit === "true" ? ro_doc_no : doc_no;
+			
+			// ✅ Validate document number is populated
+			if (!document_to_process || document_to_process === 'undefined') {
+				alert('Error: Document number not found. Please refresh and try again.');
+				console.error('document_to_process is undefined or empty');
+				return false;
+			}
+			
+			var update_url = "<?php echo base_url();?>c_dts/update_stat?doc_no="+document_to_process+"&ef_id=4";
+			
+			// ✅ For RO In-Transit documents, use different endpoint
+			if(is_ro_intransit === "true") {
+				update_url = "<?php echo base_url();?>c_dts/receive_ro_intransit?doc_no="+document_to_process;
+			}
+			
+			console.log('Receive Document Button Clicked');
+			console.log('RO Document No:', ro_doc_no);
+			console.log('DTS Document No:', doc_no);
+			console.log('Is RO In-Transit:', is_ro_intransit);
+			console.log('Processing Document:', document_to_process);
+			console.log('Update URL:', update_url);
+			console.log('Form data:', $("#doc_frm").serialize());
+			
+			$.ajax({ 
+				type: "POST", 
+				url: update_url,
+				data: $("#doc_frm").serialize(),
+				timeout: 30000,  // 30 second timeout
+				success: function(response){
+					console.log('AJAX success response:', response);
+					console.log('Response type:', typeof response);
+					
+					// ✅ For RO In-Transit, show success message and close modal
+					if(is_ro_intransit === "true") {
+						try {
+							var resp = typeof response === 'string' ? JSON.parse(response) : response;
+							console.log('Parsed response:', resp);
+							console.log('Response success flag:', resp.success);
+							console.log('Response debug info:', resp.debug);
+							
+							if (resp.success) {
+								// Close the preview modal first
+								$('#modal_content').closest('.ui-dialog').find('.ui-dialog-titlebar-close').click();
 								
-								$('#for_dc').text('Archiving Record ').append('<img src="<?php echo base_url();?>ext_lib/images/load_logo.gif" class="uploading_img" style="float:right;height:30px;margin:-5px 0px -10px 0px;mix-blend-mode:multiply" />');
-										
-								setTimeout(function() {$("#modal_content").load("<?php echo base_url();?>c_dts/get_prev_page?doc_no="+doc_no+"").dialog({
-												title: 'Record Preview',
-												resizable: false,
-												width: '90%',
-												show: 'fade',
-												hide: 'fade',
-												modal: true,
-												closeOnEscape: false,
-												close: function() {
-													$('.doc_count').each(function(){
-														var ids = $('#'+$(this).attr('id'))['selector'].replace('#', '');
-														get_count_rec(ids).done(function(response){
-															$('#'+ids).text(response[0]['cnt']);
-														});
-													});
-													record_tbl.draw();
-													// window.location.reload();
-												},
-												position: {
-													my: 'center',
-													at: 'top',
-												},
-												
-												
-								});}, 2000);			
+								// Show success message
+								$('#up_msg').html('<center><br><h2 style="color:green;"><b>✓ Document Successfully Received</b></h2><p>The document has been added to DTS records.<br>It will be removed from the RO In-Transit list.</p><br></center>').dialog({
+									title: 'Success',
+									resizable: false,
+									width: 500,
+									modal: true,
+									buttons: {
+										Ok: function() {
+											$(this).dialog('close');
+											// Refresh counts and table
+											$('.doc_count').each(function(){
+												var ids = $('#'+$(this).attr('id'))['selector'].replace('#', '');
+												get_count_rec(ids).done(function(response){
+													$('#'+ids).text(response[0]['cnt']);
+												});
+											});
+											record_tbl.draw();
+										}
+									}
+								});
+							} else {
+								alert('Error: ' + (resp.message || 'Failed to receive document') + '\nDebug: ' + JSON.stringify(resp.debug));
+								console.error('Document receipt failed:', resp);
+								console.error('Debug info:', resp.debug);
 							}
+						} catch (parseError) {
+							console.error('Error parsing AJAX response:', parseError);
+							console.error('Raw response:', response);
+							alert('Error parsing server response: ' + parseError.message);
+						}
+					} else {
+						// ✅ For regular documents, reload the record preview
+						$('#recvb').text('Updating ').append('<img src="<?php echo base_url();?>ext_lib/images/load_logo.gif" class="uploading_img" style="float:right;height:30px;margin:-5px 0px -10px 0px;mix-blend-mode:multiply" />');
+						
+						setTimeout(function() {
+							$("#modal_content").load("<?php echo base_url();?>c_dts/get_prev_page?doc_no="+doc_no+"").dialog({
+								title: 'Record Preview',
+								resizable: false,
+								width: '90%',
+								show: 'fade',
+								hide: 'fade',
+								modal: true,
+								closeOnEscape: false,
+								close: function() {
+									$('.doc_count').each(function(){
+										var ids = $('#'+$(this).attr('id'))['selector'].replace('#', '');
+										get_count_rec(ids).done(function(response){
+											$('#'+ids).text(response[0]['cnt']);
+										});
+									});
+									record_tbl.draw();
+								},
+								position: {
+									my: 'center',
+									at: 'top',
+								},
+							});
+						}, 2000);
+					}			
+				},
+				error: function(xhr, status, error) {
+					console.error('AJAX error - status:', status, 'error:', error);
+					console.error('Response:', xhr.responseText);
+					$('#up_msg').html('<center><br><label style="color:red"><b>Error: ' + error + '</b></label><br><p>' + xhr.responseText + '</p></center>').dialog({
+						title: 'Error',
+						resizable: false,
+						width: 500,
+						modal: true
 					});
+				}
+			});
 				
+	});  // ✅ Close #recvb click handler
+	
+	// ✅ #returnb click handler - Return RO In-Transit Document
+	$('#returnb').on('click', function(e) {
+		e.preventDefault();
+		
+		var doc_no = $('#doc_no').val();
+		var ro_doc_no = $('#ro_doc_no').val();
+		var is_ro_intransit = '<?php echo (isset($is_ro_intransit) && $is_ro_intransit) ? "true" : "false"; ?>';
+		
+		if (is_ro_intransit !== "true") {
+			alert('Return feature only available for RO In-Transit documents');
+			return false;
+		}
+		
+		if (!ro_doc_no) {
+			alert('Error: Document number not found');
+			return false;
+		}
+		
+		// Show confirmation dialog with return reason
+		$('#up_msg').html('<center><br><h3>Return Document?</h3><p>This will return the document to the sender and remove it from your received list.</p><br><label>Return Reason (optional):</label><br><textarea id="return_reason" style="width: 100%; height: 80px; padding: 5px; border: 1px solid #ccc; border-radius: 3px;"></textarea><br></center>').dialog({
+			title: 'Confirm Return',
+			resizable: false,
+			width: 500,
+			modal: true,
+			buttons: {
+				'Return Document': function() {
+					var return_reason = $('#return_reason').val() || 'No reason provided';
+					$(this).dialog('close');
+					
+					// Call return endpoint
+					var return_url = "<?php echo base_url();?>c_dts/return_ro_intransit?doc_no=" + ro_doc_no;
+					
+					console.log('Returning document:', ro_doc_no);
+					console.log('Return URL:', return_url);
+					
+					$.ajax({
+						type: "POST",
+						url: return_url,
+						data: {
+							return_reason: return_reason
+						},
+						timeout: 30000,
+						success: function(response) {
+							console.log('Return response:', response);
+							var resp = typeof response === 'string' ? JSON.parse(response) : response;
+							
+							if (resp.success) {
+								// ✅ Close the main preview modal first
+								$('#modal_content').closest('.ui-dialog').find('.ui-dialog-titlebar-close').click();
+								
+								// ✅ Show success message (no buttons)
+								$('#up_msg').html('<center><br><h2 style="color:green;"><b>✓ Document Successfully Returned</b></h2><p>The document has been returned to the sender.</p><br></center>').dialog({
+									title: 'Success',
+									resizable: false,
+									width: 500,
+									modal: true,
+									buttons: {}  // ✅ Explicitly remove all buttons
+								});
+								
+								// ✅ Auto-close success message after 2.5 seconds
+								setTimeout(function() {
+									$('#up_msg').dialog('close');
+									
+									// ✅ Refresh counts and table
+									$('.doc_count').each(function(){
+										var ids = $('#'+$(this).attr('id'))['selector'].replace('#', '');
+										get_count_rec(ids).done(function(response){
+											$('#'+ids).text(response[0]['cnt']);
+										});
+									});
+									record_tbl.draw();
+								}, 2500);
+							} else {
+								alert('Error: ' + (resp.message || 'Failed to return document'));
+								console.error('Document return failed:', resp);
+							}
+						},
+						error: function(xhr, status, error) {
+							console.error('AJAX error - status:', status, 'error:', error);
+							console.error('Response:', xhr.responseText);
+							$('#up_msg').html('<center><br><label style="color:red"><b>Error: ' + error + '</b></label><br><p>' + xhr.responseText + '</p></center>').dialog({
+								title: 'Error',
+								resizable: false,
+								width: 500,
+								modal: true
+							});
+						}
+					});
+				},
+				'Cancel': function() {
+					$(this).dialog('close');
+				}
+			}
 		});
-		
-		$('#retrnb').button().on('click', function(e) {
+	});  // ✅ Close #returnb click handler
+	
+	// ✅ #for_dc button click handler - Archives the document for Chief
+	$('#for_dc').on('click', function(e) {
+		e.preventDefault();
+		var doc_no = $('#doc_no').val();
+		$.ajax({
+			type: "POST", 
+			url: "<?php echo base_url();?>c_dts/update_stat?doc_no="+doc_no+"&ef_id=7",
+			data: $("#doc_frm").serialize(),
+			success: function(){
+				$('#for_dc').text('Archiving Record ').append('<img src="<?php echo base_url();?>ext_lib/images/load_logo.gif" class="uploading_img" style="float:right;height:30px;margin:-5px 0px -10px 0px;mix-blend-mode:multiply" />');
 				
-				var doc_no = $('#doc_no').val();
+				setTimeout(function() {
+					$("#modal_content").load("<?php echo base_url();?>c_dts/get_prev_page?doc_no="+doc_no+"").dialog({
+						title: 'Record Preview',
+						resizable: false,
+						width: '90%',
+						show: 'fade',
+						hide: 'fade',
+						modal: true,
+						closeOnEscape: false,
+						close: function() {
+							$('.doc_count').each(function(){
+								var ids = $('#'+$(this).attr('id'))['selector'].replace('#', '');
+								get_count_rec(ids).done(function(response){
+									$('#'+ids).text(response[0]['cnt']);
+								});
+							});
+							record_tbl.draw();
+						},
+						position: {
+							my: 'center',
+							at: 'top',
+						},
+					});
+				}, 2000);			
+			}
+		});
+	});  // ✅ Close #for_dc click handler
+		
+		// ✅ #retrnb button click handler - Returns document
+		$('#retrnb').on('click', function(e) {
+			e.preventDefault();
+			var doc_no = $('#doc_no').val();
 				$('#up_msg').html('<center><br><table><tr><td style="vertical-align:top;width:100px"><b>Reason: </b></td><td><textarea rows="5" cols="34" type="input" name="ret_reason" id="ret_reason" placeholder="Optional" ></textarea></td></tr></table></center>').dialog({
 											title: 'Confirm Returning',
 											resizable: false,
@@ -995,11 +1280,10 @@
 											}
 					
 				});
-		});
+		});  // ✅ Close #retrnb click handler
 		
 		$('#ackb').button().on('click', function(e) {
-				
-				var doc_no = $('#doc_no').val();
+			var doc_no = $('#doc_no').val();
 				
 				$('#up_msg').html('<center><br><table><tr><td style="vertical-align:top;width:100px"><b>Remarks: </b></td><td><textarea rows="5" cols="34" type="input" name="ack_remarks" id="ack_remarks" placeholder="Optional" ></textarea></td></tr></table></center>').dialog({
 														title: 'Confirm Acknowledgement',
@@ -1116,7 +1400,7 @@
 			x++;	
 		});
 		
-		
+	
 							
 	});
 

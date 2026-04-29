@@ -11,10 +11,7 @@ class C_dts extends CI_Controller {
 			$this->load->helper('url');
 			$this->load->helper(array('form', 'url'));
 			$this->load->library('form_validation');  
-			$this->load->library('dompdf_gen');
-			$this->load->library('zip');
-			$this->load->helper('download');
-			
+		$this->load->library('mpdf_gen');
 			$this->output->set_header('Last-Modified:'.gmdate('D, d M Y H:i:s').'GMT');
 			$this->output->set_header('Cache-Control: no-store, no-cache, must-revalidate');
 			$this->output->set_header('Cache-Control: post-check=0, pre-check=0',false);
@@ -283,21 +280,326 @@ class C_dts extends CI_Controller {
 	
 	if($this->session->userdata('valid') == TRUE){
 		$doc_no = $_GET['doc_no'];
+		
+		// ✅ FIRST: Try to get RO In-Transit document data
+		$api_base_url = 'https://dmsapi.denr10.com.ph';
+		$user_office = $this->session->userdata('off_log_penro');
+		
+		$ro_intransit_result = null;
+		if ($user_office) {
+			$api_url = $api_base_url . '/dms/documents/ro-in-transit?per_page=100&office_name=' . urlencode($user_office);
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $api_url);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			
+			$response = curl_exec($ch);
+			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			curl_close($ch);
+			
+			if ($http_code === 200 && $response) {
+				$api_response = json_decode($response, true);
+				if (isset($api_response['data']) && is_array($api_response['data'])) {
+					// Find the document matching this doc_no
+					foreach ($api_response['data'] as $doc) {
+						if (isset($doc['document_no']) && $doc['document_no'] === $doc_no) {
+							$ro_intransit_result = $doc;
+							break;
+						}
+					}
+				}
+			}
+		}
+		
+		// ✅ Load legacy data for records
 		$data['log_rec'] = $this->m_dts->get_logs($doc_no);
 		$data['records'] = $this->m_dts->get_records_prev($doc_no);
 		$data['div_list'] = $this->m_dts->get_off_div();
-				
 		$data['doc_no'] = $doc_no;
 		$data['sec_list'] = $this->m_dts->get_off_sec();
 		$data['unit_list'] = $this->m_dts->get_off_unit();
 		$data['act_desc'] = $this->m_dts->get_act_desc();
 		$data['doc_type'] = $this->m_dts->get_doc_type();
-		$data['files'] = $this->m_dts->get_files($doc_no);
+		
+		// ✅ If RO In-Transit document found, set its data
+		if ($ro_intransit_result) {
+			$data['files'] = array();
+			$data['is_ro_intransit'] = true;
+			
+			// Always set metadata from the list response first
+			$data['ro_metadata'] = array(
+				'document_no' => $ro_intransit_result['document_no'],
+				'subject' => $ro_intransit_result['subject'],
+				'sender' => $ro_intransit_result['sender'],
+				'priority_level' => $ro_intransit_result['priority_level'] ?? 'N/A',
+				'recipient' => $ro_intransit_result['recipient'] ?? 'N/A',
+				'date_released' => $ro_intransit_result['date_released'] ?? 'N/A',
+				'document_date' => $ro_intransit_result['document_date_formatted'] ?? 'N/A',
+				'date_uploaded' => $ro_intransit_result['date_received_formatted'] ?? 'N/A'
+			);
+			
+			// Fetch detail to get files
+			$detail_url = $api_base_url . '/dms/documents/ro-in-transit/' . $ro_intransit_result['incoming_initial_id'];
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $detail_url);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			
+			$response = curl_exec($ch);
+			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$curl_error = curl_error($ch);
+			curl_close($ch);
+			
+			// Log the API response for debugging
+			error_log("RO Detail API - URL: $detail_url | HTTP Code: $http_code | Curl Error: $curl_error");
+			if ($response) {
+				error_log("RO Detail API Response: " . substr($response, 0, 500));
+			}
+			
+			if ($http_code === 200 && $response) {
+				$detail_response = json_decode($response, true);
+				error_log("RO Detail Decoded - Success: " . (isset($detail_response['success']) ? ($detail_response['success'] ? 'true' : 'false') : 'unknown'));
+				
+				if (isset($detail_response['data']) && isset($detail_response['data']['uploading_of_final_action'])) {
+					$detail_data = $detail_response['data'];
+					error_log("RO Detail - uploading_of_final_action count: " . count($detail_data['uploading_of_final_action']));
+					
+					// Extract files from uploading_of_final_action
+					if (is_array($detail_data['uploading_of_final_action']) && count($detail_data['uploading_of_final_action']) > 0) {
+						foreach ($detail_data['uploading_of_final_action'] as $upload) {
+							error_log("RO Detail - Processing upload: " . json_encode($upload));
+							if (isset($upload['final_action_document'])) {
+								$files_to_process = [];
+								if (is_array($upload['final_action_document'])) {
+									$files_to_process = $upload['final_action_document'];
+								} elseif (is_string($upload['final_action_document']) && !empty($upload['final_action_document'])) {
+									$files_to_process = [$upload['final_action_document']];
+								}
+								
+								error_log("RO Detail - Files to process: " . count($files_to_process));
+								foreach ($files_to_process as $file) {
+									if (!empty($file)) {
+										$data['files'][] = array(
+											'file_name' => $file,
+											'office_name' => $upload['office_name'] ?? 'Unknown',
+											'date_released' => $upload['date_released'] ?? null
+										);
+										error_log("RO Detail - File added: $file");
+									}
+								}
+							}
+						}
+					} else {
+						error_log("RO Detail - uploading_of_final_action is empty or not an array");
+					}
+				} else {
+					error_log("RO Detail - Missing data or uploading_of_final_action. Keys: " . implode(', ', isset($detail_response['data']) ? array_keys($detail_response['data']) : ['none']));
+				}
+			} else {
+				error_log("RO Detail API Failed - HTTP $http_code, Response: $response");
+			}
+		} else {
+			// Fallback to legacy DTS system
+			$data['files'] = $this->m_dts->get_files($doc_no);
+			$data['is_ro_intransit'] = false;
+			$data['ro_metadata'] = null;
+		}
 		
 		$this->load->view('preview_page',$data);
 	}else{redirect('c_dts');}
 	}
 	
+	/**
+	 * Fetch RO In-Transit document files and metadata from the uploading of final action
+	 * Returns array with 'files' and 'metadata' if RO In-Transit document exists, false otherwise
+	 */
+	private function get_ro_intransit_files($doc_no)
+	{
+		try {
+			log_message('info', 'DTS - Searching for RO In-Transit document: ' . $doc_no);
+			
+			// Get user's office from session for filtering
+			$user_office = $this->session->userdata('off_log_penro');
+			if (!$user_office) {
+				log_message('warning', 'DTS - User office not found in session');
+				return false;
+			}
+			
+			log_message('info', 'DTS - User office: ' . $user_office);
+			
+			$api_base_url = 'https://dmsapi.denr10.com.ph';
+			$api_url = $api_base_url . '/dms/documents/ro-in-transit?per_page=100&office_name=' . urlencode($user_office);
+			
+			log_message('info', 'DTS - API URL: ' . $api_url);
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $api_url);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+			
+			$response = curl_exec($ch);
+			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$curl_error = curl_error($ch);
+			curl_close($ch);
+			
+			log_message('info', 'DTS - RO In-Transit list API HTTP Code: ' . $http_code);
+			
+			if ($curl_error) {
+				log_message('error', 'DTS - cURL Error: ' . $curl_error);
+				return false;
+			}
+			
+			if ($http_code !== 200 || !$response) {
+				log_message('error', 'DTS - API Error HTTP ' . $http_code . ' Response: ' . substr($response, 0, 200));
+				return false;
+			}
+			
+			$api_response = json_decode($response, true);
+			log_message('info', 'DTS - API Response: success=' . ($api_response['success'] ?? 'false') . ', data_count=' . count($api_response['data'] ?? []));
+			
+			if (!isset($api_response['success']) || !$api_response['success'] || !isset($api_response['data'])) {
+				log_message('error', 'DTS - Invalid API response structure');
+				return false;
+			}
+			
+			// Find the document matching the doc_no
+			$documents = $api_response['data'];
+			$document = null;
+			
+			foreach ($documents as $doc) {
+				if (isset($doc['document_no']) && $doc['document_no'] === $doc_no) {
+					$document = $doc;
+					log_message('info', 'DTS - Found RO In-Transit document: ' . $doc_no);
+					break;
+				}
+			}
+			
+			if (!$document) {
+				log_message('info', 'DTS - Document not found in RO In-Transit list: ' . $doc_no . '. Available docs: ' . json_encode(array_column($documents, 'document_no')));
+				return false;
+			}
+			
+			// Get the document ID and fetch uploading of final action files
+			$doc_id = $document['incoming_initial_id'];
+			log_message('info', 'DTS - Fetching document detail, ID: ' . $doc_id);
+			
+			$detail_url = $api_base_url . '/dms/documents/ro-in-transit/' . $doc_id;
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $detail_url);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+			
+			$response = curl_exec($ch);
+			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$curl_error = curl_error($ch);
+			curl_close($ch);
+			
+			log_message('info', 'DTS - Detail API HTTP Code: ' . $http_code);
+			
+			if ($curl_error) {
+				log_message('error', 'DTS - Detail cURL Error: ' . $curl_error);
+				return false;
+			}
+			
+			if ($http_code !== 200 || !$response) {
+				log_message('error', 'DTS - Detail API Error HTTP ' . $http_code);
+				return false;
+			}
+			
+			$detail_response = json_decode($response, true);
+			log_message('info', 'DTS - Detail Response: ' . json_encode([
+				'success' => $detail_response['success'] ?? false,
+				'has_uploading' => isset($detail_response['data']['uploading_of_final_action']),
+				'upload_count' => count($detail_response['data']['uploading_of_final_action'] ?? [])
+			]));
+			
+			if (!isset($detail_response['success']) || !$detail_response['success'] || !isset($detail_response['data'])) {
+				log_message('error', 'DTS - Invalid detail response');
+				return false;
+			}
+			
+			$document_detail = $detail_response['data'];
+			$files_array = array();
+			
+			// ✅ Extract files from uploading of final action history
+			if (isset($document_detail['uploading_of_final_action']) && is_array($document_detail['uploading_of_final_action'])) {
+				log_message('info', 'DTS - Found ' . count($document_detail['uploading_of_final_action']) . ' uploading records');
+				
+				foreach ($document_detail['uploading_of_final_action'] as $upload) {
+					// Each upload record has final_action_document files
+					if (isset($upload['final_action_document'])) {
+						// Handle both string and array formats
+						$files_to_process = [];
+						if (is_array($upload['final_action_document'])) {
+							$files_to_process = $upload['final_action_document'];
+						} elseif (is_string($upload['final_action_document']) && !empty($upload['final_action_document'])) {
+							// Single file as string
+							$files_to_process = [$upload['final_action_document']];
+						}
+						
+						if (!empty($files_to_process)) {
+							log_message('info', 'DTS - Upload from ' . ($upload['office_name'] ?? 'Unknown') . ' has ' . count($files_to_process) . ' files');
+							
+							foreach ($files_to_process as $file) {
+								if (!empty($file)) {
+									$files_array[] = array(
+										'file_name' => $file,
+										'office_name' => $upload['office_name'] ?? 'Unknown',
+										'date_released' => $upload['date_released'] ?? null
+									);
+								}
+							}
+						}
+					}
+				}
+			} else {
+				log_message('info', 'DTS - No uploading_of_final_action data found');
+			}
+			
+			log_message('info', 'DTS - Total files found before dedup: ' . count($files_array));
+			
+			// ✅ DEDUPLICATE FILES - remove exact duplicates
+			$unique_files = array();
+			$seen_filenames = array();
+			foreach ($files_array as $file_entry) {
+				$filename = $file_entry['file_name'];
+				if (!in_array($filename, $seen_filenames)) {
+					$unique_files[] = $file_entry;
+					$seen_filenames[] = $filename;
+				}
+			}
+			
+			// ✅ Return files with document metadata
+			// Always return metadata even if there are no files yet
+			return array(
+				'files' => $unique_files,
+				'metadata' => array(
+					'document_no' => $document['document_no'],
+					'subject' => $document['subject'],
+					'sender' => $document['sender'],
+					'priority_level' => $document['priority_level'] ?? 'N/A',
+					'recipient' => $document['recipient'] ?? 'N/A',
+					'date_released' => $document['date_released'] ?? 'N/A',
+					'document_date' => $document['document_date_formatted'] ?? 'N/A',
+					'date_uploaded' => $document['date_received_formatted'] ?? 'N/A'
+				)
+			);
+			
+		} catch (Exception $e) {
+			log_message('error', 'RO In-Transit file fetch error: ' . $e->getMessage());
+			return false;
+		}
+	}
+
 	public function get_section()
 	{   
 		$doc_no = $_GET['doc_no'];
@@ -449,7 +751,7 @@ class C_dts extends CI_Controller {
 		
 	public function get_record_data()
 	{
-			$trigg = $this->input->post('trigg');
+			$trigg = intval($this->input->post('trigg'));
 			$draw = intval($this->input->post('draw'));
             $offset = intval($this->input->post('start'));
             $limit = intval($this->input->post('length'));
@@ -491,10 +793,13 @@ class C_dts extends CI_Controller {
 				  elseif($trigg==6){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.ef_id = 9 AND (doc_rec.doc_no LIKE "'.date('Y').'-%" OR doc_rec.doc_no LIKE "'.(date('Y')-1).'-12-%") '.$query_search.' ORDER BY '.$ordrBy;}
 				 }
 			  else{
-				  if($trigg==0 OR $trigg==99){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE "%,'.$div_id.',%" AND doc_rec.doc_class = "1" AND doc_rec.ef_id != 6 AND (doc_rec.doc_no LIKE "'.date('Y').'-%" OR doc_rec.doc_no LIKE "'.(date('Y')-1).'-12-%") '.$query_search.' ORDER BY '.$ordrBy;}
+				  // ✅ FIX: For non-PENRO offices, show documents routed to them OR routed to PENRO (parent) OR unrouted documents
+				  if($trigg==0 OR $trigg==99){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE (doc_rec.div_id LIKE "%,'.$div_id.',%" OR doc_rec.div_id LIKE "%,1,%" OR (doc_rec.div_id IS NULL OR doc_rec.div_id = ",") OR doc_rec.doc_class = "2") AND (doc_rec.doc_no LIKE "'.date('Y').'-%" OR doc_rec.doc_no LIKE "'.(date('Y')-1).'-12-%") '.$query_search.' ORDER BY '.$ordrBy;}
 				  elseif($trigg==1){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE "%,'.$div_id.',%" AND doc_rec.doc_class = "1" AND doc_rec.ef_id = 2 '.$query_search.' ORDER BY '.$ordrBy;}
 				  elseif($trigg==2){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE "%,'.$div_id.',%" AND doc_rec.doc_class = "1" AND (doc_rec.ef_id != 2 AND doc_rec.ef_id != 6 AND doc_rec.ef_id != 7 AND doc_rec.ef_id != 8 AND doc_rec.ef_id != 9 AND doc_rec.ef_id != 10) '.$query_search.' ORDER BY '.$ordrBy;}
 				  elseif($trigg==3){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE "%,'.$div_id.',%" AND doc_rec.doc_class = "1" AND (doc_rec.ef_id = 7 OR doc_rec.ef_id = 8 OR doc_rec.ef_id = 5 OR doc_rec.ef_id = 10 OR doc_rec.doc_no NOT LIKE "%'.date('Y').'%") '.$query_search.' ORDER BY '.$ordrBy;}
+				  elseif($trigg==4){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE "%,'.$div_id.',%" AND doc_rec.doc_class = "1" AND doc_rec.ef_id = 1 AND (doc_rec.doc_no LIKE "'.date('Y').'-%" OR doc_rec.doc_no LIKE "'.(date('Y')-1).'-12-%") '.$query_search.' ORDER BY '.$ordrBy;}
+				  elseif($trigg==5){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE "%,'.$div_id.',%" AND doc_rec.doc_class = "1" AND doc_rec.ef_id = 6 AND (doc_rec.doc_no LIKE "'.date('Y').'-%" OR doc_rec.doc_no LIKE "'.(date('Y')-1).'-12-%") '.$query_search.' ORDER BY '.$ordrBy;}
 				  elseif($trigg==6){$thesql2 = 'SELECT * FROM doc_rec INNER JOIN event_flags ON (doc_rec.ef_id = event_flags.ef_id) INNER JOIN doc_type ON (doc_rec.dt_id = doc_type.dt_id) WHERE doc_rec.div_id LIKE "%,'.$div_id.',%" AND doc_rec.doc_class = "1" AND doc_rec.ef_id = 9 AND (doc_rec.doc_no LIKE "'.date('Y').'-%" OR doc_rec.doc_no LIKE "'.(date('Y')-1).'-12-%") '.$query_search.' ORDER BY '.$ordrBy;}
 				}
 			
@@ -673,6 +978,524 @@ class C_dts extends CI_Controller {
 		
 	}
 	
+	/**
+	 * ✅ Mark RO In-Transit document as received
+	 * Sends update to Laravel r10api AND creates DTS record in doc_rec table
+	 */
+	public function receive_ro_intransit()
+	{
+		try {
+			date_default_timezone_set('Asia/Manila');
+			
+			header('Content-Type: application/json');
+			
+			$doc_no = isset($_GET['doc_no']) ? $_GET['doc_no'] : null;
+			
+			if (!$doc_no) {
+				http_response_code(400);
+				echo json_encode(array('success' => false, 'message' => 'Missing doc_no parameter'));
+				exit;
+			}
+			
+			// Get user's office from session
+			$user_office = $this->session->userdata('off_log_penro');
+			$user_id = $this->session->userdata('u_log_id');
+			$receiving_div_id = $this->session->userdata('div_log_id');
+			$user_fname = $this->session->userdata('u_log_fname');
+			$user_lname = $this->session->userdata('u_log_lname');
+			
+			// ✅ DEBUG: Check what we actually got from session
+			$response_debug = array(
+				'session_user_office' => $user_office,
+				'session_user_id' => $user_id,
+				'session_div_id' => $receiving_div_id,
+				'session_user_name' => $user_fname . ' ' . $user_lname
+			);
+			
+			if (!$user_office || !$user_id) {
+				http_response_code(401);
+				echo json_encode(array(
+					'success' => false, 
+					'message' => 'User session expired or not set',
+					'debug' => $response_debug
+				));
+				exit;
+			}
+			
+			// ✅ CRITICAL: Check if div_log_id is set, if not the session might be invalid
+			if (!$receiving_div_id) {
+				log_message('warning', 'DTS - div_log_id not found in session, user might need to relogin');
+				http_response_code(401);
+				echo json_encode(array('success' => false, 'message' => 'Division information missing - please reload page or login again'));
+				exit;
+			}
+			
+			$api_base_url = 'https://dmsapi.denr10.com.ph';
+			
+			// First, fetch the document to get its ID and metadata
+			$list_url = $api_base_url . '/dms/documents/ro-in-transit?per_page=100&office_name=' . urlencode($user_office);
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $list_url);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+			
+			$response = curl_exec($ch);
+			$curl_error = curl_error($ch);
+			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			curl_close($ch);
+			
+			if ($curl_error) {
+				log_message('error', 'DTS - cURL error fetching RO In-Transit list: ' . $curl_error);
+				http_response_code(502);
+				echo json_encode(array('success' => false, 'message' => 'Connection error: ' . $curl_error));
+				exit;
+			}
+			
+			if ($http_code !== 200 || !$response) {
+				log_message('error', 'DTS - Failed to fetch RO In-Transit list. HTTP: ' . $http_code . ', Response: ' . $response);
+				http_response_code(502);
+				echo json_encode(array('success' => false, 'message' => 'Failed to fetch document from API (HTTP ' . $http_code . ')'));
+				exit;
+			}
+			
+			$api_response = json_decode($response, true);
+			if (!isset($api_response['data']) || !is_array($api_response['data'])) {
+				log_message('error', 'DTS - Invalid API response structure: ' . json_encode($api_response));
+				http_response_code(502);
+				echo json_encode(array('success' => false, 'message' => 'Invalid API response'));
+				exit;
+			}
+			
+			// Find the document matching doc_no
+			$document = null;
+			$doc_id = null;
+			foreach ($api_response['data'] as $doc) {
+				if (isset($doc['document_no']) && $doc['document_no'] === $doc_no) {
+					$document = $doc;
+					$doc_id = $doc['incoming_initial_id'];
+					break;
+				}
+			}
+			
+			if (!$doc_id || !$document) {
+				log_message('error', 'DTS - Document not found in API: ' . $doc_no . '. Response data: ' . json_encode($api_response['data']));
+				http_response_code(404);
+				echo json_encode(array('success' => false, 'message' => 'Document not found in API'));
+				exit;
+			}
+			
+			// ✅ Fetch document detail to get files
+			$document_detail = null;
+			$detail_url = $api_base_url . '/dms/documents/ro-in-transit/' . $doc_id;
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $detail_url);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+			
+			$detail_response = curl_exec($ch);
+			$detail_http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$detail_curl_error = curl_error($ch);
+			curl_close($ch);
+			
+			if (!$detail_curl_error && $detail_http_code === 200 && $detail_response) {
+				$detail_decoded = json_decode($detail_response, true);
+				if (isset($detail_decoded['success']) && $detail_decoded['success'] && isset($detail_decoded['data'])) {
+					$document_detail = $detail_decoded['data'];
+					log_message('info', 'DTS - Successfully fetched document detail with files');
+				}
+			}
+			
+			// ✅ Create a record in doc_rec table for DTS tracking
+			// Generate a new DTS document number (not using RO In-Transit doc_no)
+			$max_id_query = $this->db->query("SELECT MAX(rec_id) AS max_id FROM doc_rec");
+			$max_id_result = $max_id_query->result_array();
+			$next_rec_id = sprintf('%04d', $max_id_result[0]['max_id'] + 1);
+			$generated_doc_no = date('Y-m') . '-' . $next_rec_id;  // Generate DTS format doc_no like 2026-03-0065
+			
+			// Use same date format as other DTS records: M-d-Y
+			$current_date = date('M-d-Y');
+			$current_time = date('h:i A');
+			
+			// ✅ FIX: Set div_id for the receiving office so document shows in their records
+			// Use the div_log_id we already validated above
+			$div_id_formatted = ',' . $receiving_div_id . ',';  // Format with commas for LIKE query
+			
+			log_message('info', 'DTS - Setting div_id for record: ' . $div_id_formatted . ' (receiving_div_id: ' . $receiving_div_id . ')');
+			
+			$dts_record = array(
+				'doc_no' => $generated_doc_no,  // ✅ Use generated DTS doc_no, not RO In-Transit doc_no
+				'u_id' => $user_id,
+				'doc_class' => 1,  // 1 = Regular document
+				'dt_id' => 1,  // Default document type (adjust if needed)
+				'doc_subject' => strtoupper(substr(isset($document['subject']) ? $document['subject'] : 'RO IN-TRANSIT DOC', 0, 255)),
+				'sender' => strtoupper(substr(isset($document['sender']) ? $document['sender'] : 'FIELD OFFICE', 0, 100)),
+				'doc_date' => $current_date,
+				'rec_date' => $current_date,
+				'act_date' => $current_date,
+				'rec_time' => $current_time,
+				'doc_date_rr' => $current_date,
+				'doc_time_rr' => $current_time,
+				'res_type' => 'RO In-Transit',
+				'div_id' => $div_id_formatted,  // ✅ SET div_id so document is visible to receiving office
+				'ef_id' => 1,  // ✅ Event flag 1 = For Routing (automatically put in routing queue)
+				'act_flag' => 0,
+				'prior_t' => 'Normal'
+			);
+			
+			// Insert into doc_rec
+			$this->db->insert('doc_rec', $dts_record);
+			
+			// Check for database errors
+			if ($this->db->affected_rows() === 0) {
+				$last_query = $this->db->last_query();
+				log_message('error', 'DTS - Database insert failed for RO In-Transit. Last query: ' . $last_query);
+				http_response_code(500);
+				echo json_encode(array('success' => false, 'message' => 'Database error: Failed to insert record'));
+				exit;
+			}
+			
+			log_message('info', 'DTS - Successfully inserted doc_rec entry for RO In-Transit: ' . $doc_no . ' as DTS doc_no: ' . $generated_doc_no);
+			
+			// ✅ Extract and save files to uplink table from the document metadata
+			if (isset($document_detail['uploading_of_final_action']) && is_array($document_detail['uploading_of_final_action'])) {
+				log_message('info', 'DTS - Processing files for uplink table');
+				
+				foreach ($document_detail['uploading_of_final_action'] as $upload) {
+					if (isset($upload['final_action_document'])) {
+						// Handle both string and array formats
+						$files_to_process = [];
+						if (is_array($upload['final_action_document'])) {
+							$files_to_process = $upload['final_action_document'];
+						} elseif (is_string($upload['final_action_document']) && !empty($upload['final_action_document'])) {
+							$files_to_process = [$upload['final_action_document']];
+						}
+						
+						// Insert each file into uplink table and copy to local uploads folder
+						foreach ($files_to_process as $file) {
+							if (!empty($file)) {
+									// ✅ Download file from Laravel storage to DTS uploads folder
+$source_url = 'https://dmsapi.denr10.com.ph/dms/documents/view-final-action/' . urlencode($file);
+								$uploads_dir = dirname(__FILE__) . '/../../uploads/';
+								
+								// Ensure uploads directory exists
+								if (!is_dir($uploads_dir)) {
+									mkdir($uploads_dir, 0777, true);
+								}
+								
+								// Remove timestamp prefix (e.g., "1774257073_REQUEST..." -> "REQUEST...")
+								$filename_to_save = $file;
+								if (preg_match('/^\d+_(.+)$/', $file, $matches)) {
+									$filename_to_save = $matches[1];  // Extract filename after timestamp_
+									log_message('info', 'DTS - Removing timestamp prefix from file: ' . $file . ' -> ' . $filename_to_save);
+								}
+								
+								// Sanitize filename for local storage
+								$sanitized_filename = preg_replace('/[^a-zA-Z0-9-_.,()ñÑ]/', '_', $filename_to_save);
+								$local_file_path = $uploads_dir . $sanitized_filename;
+								
+								// Download file from Laravel storage
+								try {
+									$ch = curl_init();
+									curl_setopt($ch, CURLOPT_URL, $source_url);
+									curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+									curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+									curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+									curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+									
+									$file_content = curl_exec($ch);
+									$curl_error = curl_error($ch);
+									$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+									curl_close($ch);
+									
+									if ($curl_error) {
+										log_message('warning', 'DTS - cURL error downloading file: ' . $curl_error . ' from ' . $source_url);
+									} else if ($http_code === 200 && !empty($file_content)) {
+										// Save to local uploads folder
+										if (file_put_contents($local_file_path, $file_content)) {
+											log_message('info', 'DTS - Successfully downloaded file to: ' . $local_file_path);
+											// Save sanitized filename to uplink
+											$this->m_dts->put_file($sanitized_filename, $generated_doc_no);
+											log_message('info', 'DTS - Added file to uplink: ' . $sanitized_filename . ' for doc_no: ' . $generated_doc_no);
+										} else {
+											log_message('error', 'DTS - Failed to save file to: ' . $local_file_path);
+											// Still add to uplink with original filename as fallback
+											$this->m_dts->put_file($sanitized_filename, $generated_doc_no);
+										}
+									} else {
+										log_message('warning', 'DTS - HTTP error ' . $http_code . ' downloading file from: ' . $source_url);
+										// Still add to uplink with sanitized filename
+										$this->m_dts->put_file($sanitized_filename, $generated_doc_no);
+									}
+								} catch (Exception $e) {
+									log_message('error', 'DTS - Exception downloading file: ' . $e->getMessage());
+									// Still add to uplink with sanitized filename
+									$this->m_dts->put_file($sanitized_filename, $generated_doc_no);
+								}
+							}
+						}
+					}
+				}
+			}
+			
+			// ✅ Log the action (no need to call external API - we just need local DTS record)
+			$event = 'RO In-Transit Document Received by ' . $this->session->userdata('u_log_fname') . ' ' . $this->session->userdata('u_log_lname');
+			$this->m_dts->put_logs($event, $generated_doc_no);  // Use generated DTS doc_no for logs
+			
+			// ✅ Mark document as received in Laravel API using NEW per-field-office endpoint
+			// This allows each field office to mark receipt independently
+			// ✅ Normalize the office name to match the field_offices list (e.g., extract to "PENRO Bukidnon")
+			$office_for_api = $user_office;
+			log_message('info', 'DTS - Received receive_ro_intransit request for office: "' . $user_office . '" (length: ' . strlen($user_office) . ')');
+			
+			// If the office name is long, try to extract the short form
+			if (strlen($user_office) > 30) {
+				log_message('info', 'DTS - Office name is long, attempting normalization');
+				// Pattern 1: "Provincial Environment and Natural Resources Office - PROVINCE_NAME"
+				if (preg_match('/(?:Provincial\s+(?:Environment|Conservation)|PENRO)[^-]*-\s*(.+?)$/i', $user_office, $matches)) {
+					$location = trim($matches[1]);
+					if (!empty($location)) {
+						$office_for_api = 'PENRO ' . $location;
+						log_message('info', 'DTS - Normalized office name via Pattern 1: "' . $user_office . '" -> "' . $office_for_api . '"');
+					}
+				}
+				// Pattern 2: Extract location from anywhere in the string
+				elseif (preg_match('/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*-\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)$/i', $user_office, $matches)) {
+					$location = trim($matches[2]);
+					if (!empty($location) && strtoupper($location) !== 'OFFICE') {
+						$office_for_api = 'PENRO ' . $location;
+						log_message('info', 'DTS - Normalized office name via Pattern 2: "' . $user_office . '" -> "' . $office_for_api . '"');
+					}
+				}
+				// Pattern 3: Fallback - try to find province/region name in parentheses
+				elseif (preg_match('/\(([^)]+)\)/', $user_office, $matches)) {
+					$location = trim($matches[1]);
+					if (!empty($location)) {
+						$office_for_api = 'PENRO ' . $location;
+						log_message('info', 'DTS - Normalized office name via Pattern 3: "' . $user_office . '" -> "' . $office_for_api . '"');
+					}
+				}
+				else {
+					log_message('warning', 'DTS - Office name is long but no normalization pattern matched. Using original: "' . $user_office . '"');
+				}
+			}
+			else {
+				log_message('info', 'DTS - Office name is short form, no normalization needed');
+			}
+			
+			log_message('info', 'DTS - About to send mark-received request with office_for_api: "' . $office_for_api . '" (original: "' . $user_office . '")');
+			
+			$mark_received_url = $api_base_url . '/dms/documents/' . $doc_id . '/field-offices/' . urlencode($office_for_api) . '/mark-received';
+			
+			$user_full_name = $this->session->userdata('u_log_fname') . ' ' . $this->session->userdata('u_log_lname');
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $mark_received_url);
+			curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+			curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+				'received_by' => $user_full_name,
+				'received_at' => date('Y-m-d H:i:s')
+			]));
+			curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
+			
+			$mark_response = curl_exec($ch);
+			$mark_http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$mark_curl_error = curl_error($ch);
+			curl_close($ch);
+			
+			// Debug response object
+			$debug_info = array(
+				'mark_received_url' => $mark_received_url,
+				'original_user_office' => $user_office,
+				'normalized_office_for_api' => $office_for_api,
+				'mark_http_code' => $mark_http_code,
+				'mark_response' => $mark_response,
+				'mark_curl_error' => $mark_curl_error,
+				'doc_id' => $doc_id,
+				'session_user_name' => $this->session->userdata('u_log_fname') . ' ' . $this->session->userdata('u_log_lname'),
+				'session_user_id' => $this->session->userdata('u_log_id')
+			);
+			
+			if ($mark_curl_error || $mark_http_code !== 200) {
+				error_log('DTS - Could not mark field office as received. HTTP: ' . $mark_http_code . ', Error: ' . $mark_curl_error . ', Response: ' . $mark_response);
+				// Don't fail - the document is already in DTS, just won't update Laravel receipt tracker
+				http_response_code(200);
+				echo json_encode(array(
+					'success' => false,
+					'message' => 'Document received but Laravel receipt marking failed',
+					'doc_no' => $generated_doc_no,
+					'debug' => $debug_info
+				));
+				exit;
+			} else {
+				error_log('DTS - Successfully marked ' . $user_office . ' as received in Laravel API for document: ' . $doc_no . ', Response: ' . $mark_response);
+				http_response_code(200);
+				echo json_encode(array(
+					'success' => true,
+					'message' => 'Document received and marked as received in Laravel',
+					'doc_no' => $generated_doc_no,
+					'debug' => $debug_info
+				));
+				exit;
+			}
+			
+		} catch (Exception $e) {
+			error_log('DTS - receive_ro_intransit exception: ' . $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine());
+			http_response_code(500);
+			echo json_encode(array(
+				'success' => false,
+				'message' => 'Server error: ' . $e->getMessage(),
+				'debug' => array(
+					'session_user_office' => $this->session->userdata('off_log_penro'),
+					'session_user_name' => $this->session->userdata('u_log_fname') . ' ' . $this->session->userdata('u_log_lname'),
+					'session_user_id' => $this->session->userdata('u_log_id')
+				)
+			));
+			exit;
+		}
+	}
+	
+	/**
+	 * ✅ Return RO In-Transit document to sender
+	 * Updates status in Laravel r10api
+	 */
+	public function return_ro_intransit()
+	{
+		try {
+			date_default_timezone_set('Asia/Manila');
+			
+			header('Content-Type: application/json');
+			
+			$doc_no = isset($_GET['doc_no']) ? $_GET['doc_no'] : null;
+			$return_reason = isset($_POST['return_reason']) ? $_POST['return_reason'] : 'No reason provided';
+			
+			if (!$doc_no) {
+				http_response_code(400);
+				echo json_encode(array('success' => false, 'message' => 'Missing doc_no parameter'));
+				exit;
+			}
+			
+			$user_office = $this->session->userdata('off_log_penro');
+			if (!$user_office) {
+				http_response_code(401);
+				echo json_encode(array('success' => false, 'message' => 'User office not found in session'));
+				exit;
+			}
+			
+			$api_base_url = 'https://dmsapi.denr10.com.ph';
+			
+			// First, find the document
+			$list_url = $api_base_url . '/dms/documents/ro-in-transit?per_page=100&office_name=' . urlencode($user_office);
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $list_url);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+			
+			$response = curl_exec($ch);
+			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			curl_close($ch);
+			
+			if ($http_code !== 200 || !$response) {
+				http_response_code(500);
+				echo json_encode(array('success' => false, 'message' => 'Failed to fetch document list from API'));
+				exit;
+			}
+			
+			$api_response = json_decode($response, true);
+			if (!isset($api_response['data']) || !is_array($api_response['data'])) {
+				http_response_code(500);
+				echo json_encode(array('success' => false, 'message' => 'Invalid API response'));
+				exit;
+			}
+			
+			// Find the document matching doc_no
+			$document = null;
+			$doc_id = null;
+			
+			foreach ($api_response['data'] as $doc) {
+				if ($doc['document_no'] === $doc_no) {
+					$document = $doc;
+					$doc_id = $doc['incoming_initial_id'];
+					break;
+				}
+			}
+			
+			if (!$document || !$doc_id) {
+				http_response_code(404);
+				echo json_encode(array('success' => false, 'message' => 'Document not found'));
+				exit;
+			}
+			
+			// ✅ Call the correct API endpoint to mark as returned
+			$return_url = $api_base_url . '/dms/documents/' . $doc_id . '/field-offices/' . urlencode($user_office) . '/return-received';
+			
+			$post_data = json_encode(array(
+				'returned_at' => date('Y-m-d H:i:s'),
+				'return_reason' => $return_reason,
+				'returned_by' => $this->session->userdata('u_log_fname') . ' ' . $this->session->userdata('u_log_lname')
+			));
+			
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $return_url);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+			curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+			curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+			
+			$response = curl_exec($ch);
+			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$curl_error = curl_error($ch);
+			curl_close($ch);
+			
+			if ($curl_error) {
+				http_response_code(500);
+				echo json_encode(array('success' => false, 'message' => 'cURL error: ' . $curl_error));
+				exit;
+			}
+			
+			// ✅ Accept both 200, 201, and 204 as success
+			if ($http_code !== 200 && $http_code !== 201 && $http_code !== 204) {
+				error_log("Document return API failed - HTTP $http_code, URL: $return_url, Response: $response");
+				http_response_code(500);
+				echo json_encode(array('success' => false, 'message' => 'API returned HTTP ' . $http_code . '. Response: ' . substr($response, 0, 200)));
+				exit;
+			}
+			
+			// Return success response
+			http_response_code(200);
+			echo json_encode(array(
+				'success' => true,
+				'message' => 'Document successfully returned to sender',
+				'doc_no' => $doc_no,
+				'return_reason' => $return_reason
+			));
+			exit;
+			
+		} catch (Exception $e) {
+			http_response_code(500);
+			echo json_encode(array(
+				'success' => false,
+				'message' => 'Error: ' . $e->getMessage()
+			));
+			exit;
+		}
+	}
+	
 	public function delete_file_sel()
 	{	
 		$file_id = $_GET['f_id'];
@@ -714,13 +1537,22 @@ class C_dts extends CI_Controller {
 							if($this->upload->do_upload('file'))
 							{
 								$data = $this->upload->data();	
-								 
-								$this->m_dts->put_file(preg_replace('/[^a-zA-Z0-9-_.,()ñÑ]/','_', $data["file_name"]),$doc_no);
-								if($doc_act_no!=null){$this->m_dts->put_file(preg_replace('/[^a-zA-Z0-9-_.,()ñÑ]/','_', $data["file_name"]),$doc_act_no);}
+								$sanitized_filename = preg_replace('/[^a-zA-Z0-9-_.,()ñÑ]/','_', $data["file_name"]);
+								
+								// Rename file on disk if sanitization changed the filename
+								if($sanitized_filename !== $data["file_name"]) {
+									$old_path = $data["full_path"];
+									$new_path = './uploads/' . $sanitized_filename;
+									rename($old_path, $new_path);
+								}
+								
+								// ✅ FIXED: Store sanitized filename in database to match actual file on disk
+								$this->m_dts->put_file($sanitized_filename,$doc_no);
+								if($doc_act_no!=null){$this->m_dts->put_file($sanitized_filename,$doc_act_no);}
 								
 								$output .= '
 											 <div style="float:left">
-											  <a id="att_fn" href="'.base_url().'uploads/'.$data["file_name"].'" target="_blank">'.$data["file_name"].'</a>
+											  <a id="att_fn" href="'.base_url().'uploads/'.$sanitized_filename.'" target="_blank">'.$sanitized_filename.'</a>
 											 </div>
 								';
 						}
@@ -734,19 +1566,34 @@ class C_dts extends CI_Controller {
 	{ 
 		$doc_no = $_GET['doc_no'];
 		
-		$data['records'] = $this->m_dts->get_records_prev($doc_no);
+		// ✅ Check if this is an RO In-Transit document
+		$ro_intransit_result = $this->get_ro_intransit_files($doc_no);
+		
+		if($ro_intransit_result) {
+			// RO In-Transit document - use API data
+			$data['records'] = array(); // Empty for RO In-Transit
+			$data['is_ro_intransit'] = true;
+			$data['ro_metadata'] = $ro_intransit_result['metadata'];
+			$data['ro_files'] = $ro_intransit_result['files'];
+			$data['log_route'] = array(); // RO In-Transit doesn't have DTS routing logs
+		} else {
+			// Legacy DTS document
+			$data['records'] = $this->m_dts->get_records_prev($doc_no);
+			$data['is_ro_intransit'] = false;
+			$data['log_route'] = $this->m_dts->get_log_route($doc_no);
+		}
+		
 		$data['div_list'] = $this->m_dts->get_off_div();
 		$data['sec_list'] = $this->m_dts->get_off_sec();
+		$data['unit_list'] = $this->m_dts->get_off_unit();
 		$data['act_desc'] = $this->m_dts->get_act_desc();
-		$data['log_route'] = $this->m_dts->get_log_route($doc_no);
 		
 		$this->load->view('rtslip_pdf', $data);
-		$this->dompdf->set_paper("A4", "portrait");
 		$html = $this->output->get_output();
-		$this->dompdf->load_html($html);
-		$this->dompdf->render();
-		$this->dompdf->stream("Routing_Slip.pdf",array('Attachment'=>0));
-		//$this->dompdf->stream("welcome.pdf");
+		// Create fresh mPDF instance for this PDF
+		$this->mpdf_gen->createInstance('A4', 'P');
+		$this->mpdf->WriteHTML($html);
+		$this->mpdf->Output("Routing_Slip.pdf", 'I');
 		
 	}
 	
@@ -769,11 +1616,10 @@ class C_dts extends CI_Controller {
 		$this->load->view('report_pdf', $data);
 		
 		$html = $this->output->get_output();
-		$this->dompdf->set_paper("legal", "landscape");
-		$this->dompdf->load_html($html);
-		$this->dompdf->render();
-		$this->dompdf->stream("Report.pdf",array('Attachment'=>0));
-		//$this->dompdf->stream("welcome.pdf");
+		// Create fresh mPDF instance for this PDF
+		$this->mpdf_gen->createInstance('legal', 'L');
+		$this->mpdf->WriteHTML($html);
+		$this->mpdf->Output("Report.pdf", 'I');
 		
 	}
 	
@@ -1027,7 +1873,7 @@ class C_dts extends CI_Controller {
 			log_message('info', 'DTS - RO In-Transit Data Request - User Office: ' . ($user_office ?? 'EMPTY'));
 			
 			// ✅ Updated API URL with office_name parameter for per-account filtering
-			$api_base_url = 'http://localhost/DMS10/r10api/public';
+			$api_base_url = 'https://dmsapi.denr10.com.ph';
 			$api_url = $api_base_url . '/dms/documents/ro-in-transit?page=1&per_page=100';
 			
 			// ✅ Filter by user's office - per account visibility
@@ -1096,16 +1942,19 @@ class C_dts extends CI_Controller {
 							'rec_id' => $doc['incoming_initial_id'],
 							'doc_no' => htmlspecialchars($doc['document_no']),
 							'sender' => htmlspecialchars($doc['sender']),
-							'doc_date' => date('M d, Y', strtotime($doc['date_received'])),
+							'doc_date' => $doc['document_date_formatted'] ?? date('M d, Y', strtotime($doc['date_received'])),
 							'doc_subject' => htmlspecialchars($doc['subject']),
-							'rec_date' => date('M d, Y', strtotime($doc['date_received'])),
-							'act_class' => '-',
+							'rec_date' => $doc['date_received_formatted'] ?? date('M d, Y', strtotime($doc['date_received'])),
+							'act_class' => $doc['priority_level'] ?? '-',
 							'sec_id' => '-',
-							'referred_office' => '-',
+							'referred_office' => $doc['recipient'] ?? '-',
 							'ef_description' => htmlspecialchars(str_replace('_', ' ', $doc['status'])),
 							'status' => htmlspecialchars(str_replace('_', ' ', $doc['status'])),
-							'dt_recv' => date('M d, Y', strtotime($doc['date_received'])),
+							'dt_recv' => $doc['date_released'] ?? '-',
 							'updated_at' => date('M d, Y', strtotime($doc['date_received'])),
+							'priority_level' => $doc['priority_level'] ?? '-',
+							'recipient' => $doc['recipient'] ?? '-',
+							'date_released' => $doc['date_released'] ?? '-',
 						);
 					}
 				} else {
@@ -1150,13 +1999,15 @@ class C_dts extends CI_Controller {
 			$user_office = $this->session->userdata('off_log_penro');
 			
 			// Fetch from r10api
-			$api_base_url = 'http://localhost/DMS10/r10api/public';
+			$api_base_url = 'https://dmsapi.denr10.com.ph';
 			$api_url = $api_base_url . '/dms/documents/ro-in-transit?page=1&per_page=1';
 			
 			// ✅ Always filter by user's office to ensure each office only sees their documents
 			if ($user_office) {
 				$api_url .= '&office_name=' . urlencode($user_office);
 			}
+			
+			log_message('info', 'RO Count API URL: ' . $api_url);
 			
 			$ch = curl_init();
 			curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -1172,11 +2023,28 @@ class C_dts extends CI_Controller {
 
 			$count = 0;
 			
+			log_message('info', 'RO Count HTTP Code: ' . $http_code);
+			log_message('info', 'RO Count Response: ' . substr($response, 0, 500));
+			
 			if ($http_code === 200 && $response) {
 				$api_response = json_decode($response, true);
 				
+				log_message('info', 'RO Count Decoded: ' . json_encode($api_response));
+				
+				// ✅ Try multiple ways to get count from API response
 				if (isset($api_response['success']) && $api_response['success']) {
-					$count = $api_response['pagination']['total'] ?? 0;
+					// Try 'total' first (common in API responses)
+					$count = $api_response['total'] ?? 0;
+					
+					// Fall back to pagination.total
+					if ($count === 0 && isset($api_response['pagination']['total'])) {
+						$count = $api_response['pagination']['total'];
+					}
+					
+					// Fall back to counting data array
+					if ($count === 0 && isset($api_response['data']) && is_array($api_response['data'])) {
+						$count = count($api_response['data']);
+					}
 				}
 			} else {
 				if ($curl_error) {
@@ -1186,6 +2054,7 @@ class C_dts extends CI_Controller {
 				}
 			}
 
+			log_message('info', 'RO Count Result: ' . $count);
 			return $count;
 
 		} catch (Exception $e) {

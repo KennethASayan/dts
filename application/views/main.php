@@ -114,7 +114,7 @@
 </li>
 <?php endif;?>
 
-<?php if($this->session->userdata('div_log_id')==1 OR strpos($this->session->userdata('div_log_alias'),'C-')!==false):?>
+<?php if($this->session->userdata('div_log_id')==1 OR $this->session->userdata('div_log_id')==26 OR strpos($this->session->userdata('div_log_alias'),'C-')!==false):?>
 <li style="position:relative;">
     <a id="rt_btn" class="doc_cat" href="#">
         <img src="<?php echo base_url();?>ext_lib/images/icon/route.png" alt="" title="For Routing"/>For Routing
@@ -140,7 +140,7 @@
 </li>
 <?php endif;?>
 
-<?php if($this->session->userdata('div_log_id')!=1 AND strpos($this->session->userdata('div_log_alias'),'C-')===false AND $this->session->userdata('role_log_id')!=6):?>
+<?php if($this->session->userdata('div_log_id')!=1 AND $this->session->userdata('div_log_id')!=26 AND strpos($this->session->userdata('div_log_alias'),'C-')===false AND $this->session->userdata('role_log_id')!=6):?>
 <li style="position:relative;">
     <a id="int_btn" class="doc_cat" href="#">
         <img src="<?php echo base_url();?>ext_lib/images/icon/transit.png" alt="" title="In Transit"/>In Transit
@@ -305,6 +305,7 @@
 			$('#menu_pane').css({'height':mc_height});
 			$('.uploading_img, #notify_act').hide();
 			$('#arec_btn').addClass("active");
+			$('#trigg').val(0);
 			
 			$('.doc_count').each(function(){
 				var ids = $('#'+$(this).attr('id'))['selector'].replace('#', '');
